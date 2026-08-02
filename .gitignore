@@ -1,0 +1,55 @@
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+denv/
+venv/
+.venv/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# DEVSIM generated files
+*.vtu
+*.vtm
+*.visit
+*.msh
+
+# Logs and temporary files
+*.log
+*.out
+*.tmp
+*.bak
+
+# ngspice / OpenVAF generated files
+*.raw
+*.osdi
+*.dll
+*.so
+
+# Excel temporary files
+~$*
+
+# Operating system files
+Thumbs.db
+.DS_Store
+
+# Generated simulation data
+*.csv
+*.xlsx
+
+# Keep shared data
+!shared_data/**/*.csv
+!shared_data/**/*.xlsx
+
+# Generated plots
+*.png
+*.jpg
+*.jpeg
+
+# Keep final result figures
+!results/final/*.png
+!results/final/*.jpg
