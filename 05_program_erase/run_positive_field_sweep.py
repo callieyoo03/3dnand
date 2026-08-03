@@ -1,18 +1,24 @@
 # ============================================================
-# MoS2 / Al2O3 / HfO2 / Al2O3 cylindrical GAA memory
-# Positive-gate-bias dielectric electric-field sweep
+# MoS2 cylindrical GAA charge-trap memory
+# Positive-gate-bias electric-field and tunneling sweep
 #
-# Purpose:
-#   1. Build the electron-only drift-diffusion device
-#   2. Use the empty trapped-charge state
-#   3. Ramp the drain to the read voltage
-#   4. Sweep positive gate voltages only
-#   5. Extract radial dielectric electric fields
-#   6. Extract the TunnelOxide inner-interface field
-#   7. Save all results to CSV
+# Main functions
+# --------------
+# 1. Build a parameterized device structure
+# 2. Solve the empty-trap electron drift-diffusion state
+# 3. Sweep positive gate voltage
+# 4. Extract dielectric radial fields
+# 5. Extract full-channel interface field
+# 6. Extract active-window interface field
+# 7. Calculate FN tunneling from the mean field
+# 8. Calculate edge-resolved FN tunneling
+# 9. Integrate tunneling current over cylindrical interface area
+# 10. Save all results to CSV
 # ============================================================
 
 import csv
+import math
+import os
 from pathlib import Path
 
 from devsim import (
@@ -49,13 +55,58 @@ from trap_models import (
 
 from field_extraction import (
     DIELECTRIC_REGIONS,
+    DEFAULT_ACTIVE_AXIAL_MINIMUM_NM,
+    DEFAULT_ACTIVE_AXIAL_MAXIMUM_NM,
+    get_active_inner_interface_radial_field_statistics,
     get_dielectric_field_statistics,
     get_inner_interface_radial_field_statistics,
+    print_active_interface_field_statistics,
     print_inner_interface_field_statistics,
     print_region_field_statistics,
 )
 
+from tunneling_models import (
+    evaluate_tunneling_current_density,
+    print_tunneling_result,
+)
+
 import trap_parameters as tp
+import tunneling_parameters as tunnel_params
+
+
+# ============================================================
+# Geometry input
+# ============================================================
+
+TUNNEL_OXIDE_THICKNESS_NM = float(
+    os.environ.get(
+        "TUNNEL_OXIDE_THICKNESS_NM",
+        "4.0",
+    )
+)
+
+
+# ============================================================
+# Active interface window
+# ============================================================
+
+ACTIVE_AXIAL_MINIMUM_NM = float(
+    os.environ.get(
+        "ACTIVE_AXIAL_MINIMUM_NM",
+        str(
+            DEFAULT_ACTIVE_AXIAL_MINIMUM_NM
+        ),
+    )
+)
+
+ACTIVE_AXIAL_MAXIMUM_NM = float(
+    os.environ.get(
+        "ACTIVE_AXIAL_MAXIMUM_NM",
+        str(
+            DEFAULT_ACTIVE_AXIAL_MAXIMUM_NM
+        ),
+    )
+)
 
 
 # ============================================================
@@ -93,24 +144,38 @@ OUTPUT_DIRECTORY = Path(
     "results"
 )
 
-OUTPUT_CSV = (
-    OUTPUT_DIRECTORY
-    / "positive_field_sweep.csv"
+default_output_filename = (
+    f"positive_field_sweep_"
+    f"tox_{TUNNEL_OXIDE_THICKNESS_NM:.1f}nm.csv"
+)
+
+OUTPUT_CSV = Path(
+    os.environ.get(
+        "POSITIVE_FIELD_SWEEP_OUTPUT",
+        str(
+            OUTPUT_DIRECTORY
+            / default_output_filename
+        ),
+    )
 )
 
 
 # ============================================================
-# Utility functions
+# Console utility
 # ============================================================
 
 def print_section(
     title,
 ):
     print()
-    print("=" * 70)
+    print("=" * 72)
     print(title)
-    print("=" * 70)
+    print("=" * 72)
 
+
+# ============================================================
+# Solver utilities
+# ============================================================
 
 def solve_dc(
     maximum_iterations=None,
@@ -140,7 +205,9 @@ def set_terminal_bias(
     set_parameter(
         device=device,
         name=f"{terminal}_bias",
-        value=float(voltage),
+        value=float(
+            voltage
+        ),
     )
 
 
@@ -176,6 +243,72 @@ def verify_device_structure():
 
 
 # ============================================================
+# Tunneling-result validation
+# ============================================================
+
+def validate_tunneling_result(
+    tunneling_result,
+):
+    required_keys = (
+        "electric_field_signed_V_cm",
+        "electric_field_abs_V_cm",
+        "fowler_nordheim_exponent",
+        "fowler_nordheim_current_density_A_cm2",
+        "signed_fowler_nordheim_current_density_A_cm2",
+        "direct_tunneling_current_density_A_cm2",
+        "trap_assisted_tunneling_current_density_A_cm2",
+        "total_tunneling_current_density_A_cm2",
+    )
+
+    for key in required_keys:
+        if key not in tunneling_result:
+            raise RuntimeError(
+                f'Missing tunneling result key: "{key}"'
+            )
+
+    finite_keys = (
+        "electric_field_signed_V_cm",
+        "electric_field_abs_V_cm",
+        "fowler_nordheim_exponent",
+        "fowler_nordheim_current_density_A_cm2",
+        "signed_fowler_nordheim_current_density_A_cm2",
+        "direct_tunneling_current_density_A_cm2",
+        "trap_assisted_tunneling_current_density_A_cm2",
+        "total_tunneling_current_density_A_cm2",
+    )
+
+    for key in finite_keys:
+        value = float(
+            tunneling_result[key]
+        )
+
+        if not math.isfinite(
+            value
+        ):
+            raise RuntimeError(
+                f'Non-finite tunneling value for "{key}".'
+            )
+
+    nonnegative_keys = (
+        "electric_field_abs_V_cm",
+        "fowler_nordheim_current_density_A_cm2",
+        "direct_tunneling_current_density_A_cm2",
+        "trap_assisted_tunneling_current_density_A_cm2",
+        "total_tunneling_current_density_A_cm2",
+    )
+
+    for key in nonnegative_keys:
+        value = float(
+            tunneling_result[key]
+        )
+
+        if value < 0.0:
+            raise RuntimeError(
+                f'Negative tunneling magnitude for "{key}".'
+            )
+
+
+# ============================================================
 # Adaptive voltage ramp
 # ============================================================
 
@@ -208,12 +341,12 @@ def adaptive_voltage_ramp(
     )
 
     step = abs(
-        initial_step
+        float(
+            initial_step
+        )
     )
 
-    maximum_step = abs(
-        initial_step
-    )
+    maximum_step = step
 
     while (
         direction
@@ -284,8 +417,8 @@ def adaptive_voltage_ramp(
 
             if step < minimum_step:
                 raise RuntimeError(
-                    f"{label}: voltage step became "
-                    f"smaller than the minimum "
+                    f"{label}: voltage step became smaller "
+                    f"than the minimum "
                     f"{minimum_step:.6f} V."
                 ) from solve_error
 
@@ -310,6 +443,450 @@ def adaptive_voltage_ramp(
 
 
 # ============================================================
+# Mean-field tunneling evaluation
+# ============================================================
+
+def evaluate_interface_tunneling(
+    tunnel_interface_statistics,
+):
+    """
+    Calculate tunneling using the full-channel signed mean
+    interface field.
+
+    This preserves the earlier J(mean E) calculation so that it
+    can be compared with edge-resolved tunneling.
+    """
+
+    interface_field_signed_V_cm = float(
+        tunnel_interface_statistics[
+            "field_mean_signed_V_cm"
+        ]
+    )
+
+    tunneling_result = (
+        evaluate_tunneling_current_density(
+            electric_field_V_cm=(
+                interface_field_signed_V_cm
+            )
+        )
+    )
+
+    validate_tunneling_result(
+        tunneling_result
+    )
+
+    program_time_s = float(
+        tunnel_params.PROGRAM_TIME_S
+    )
+
+    total_current_density_A_cm2 = float(
+        tunneling_result[
+            "total_tunneling_current_density_A_cm2"
+        ]
+    )
+
+    injected_charge_density_C_cm2 = (
+        total_current_density_A_cm2
+        * program_time_s
+    )
+
+    injected_electron_sheet_density_cm2 = (
+        injected_charge_density_C_cm2
+        / tunnel_params.q
+    )
+
+    return {
+        "tunneling_result": (
+            tunneling_result
+        ),
+
+        "program_time_s": (
+            program_time_s
+        ),
+
+        "total_current_density_A_cm2": (
+            total_current_density_A_cm2
+        ),
+
+        "injected_charge_density_C_cm2": (
+            injected_charge_density_C_cm2
+        ),
+
+        "injected_electron_sheet_density_cm2": (
+            injected_electron_sheet_density_cm2
+        ),
+    }
+
+
+# ============================================================
+# Edge-resolved tunneling evaluation
+# ============================================================
+
+def evaluate_edge_resolved_interface_tunneling(
+    active_interface_statistics,
+):
+    """
+    Calculate tunneling independently at every active interface
+    edge.
+
+    For each edge:
+
+        I_i = J(E_i) * A_i
+
+    Integrated current:
+
+        I_total = sum_i I_i
+
+    Area-averaged effective current density:
+
+        J_effective = I_total / A_total
+    """
+
+    edge_data = (
+        active_interface_statistics[
+            "edge_data"
+        ]
+    )
+
+    if not edge_data:
+        raise RuntimeError(
+            "Active interface edge data are empty."
+        )
+
+    total_interface_area_cm2 = float(
+        active_interface_statistics[
+            "total_interface_area_cm2"
+        ]
+    )
+
+    if total_interface_area_cm2 <= 0.0:
+        raise RuntimeError(
+            "Total active interface area must be positive."
+        )
+
+    program_time_s = float(
+        tunnel_params.PROGRAM_TIME_S
+    )
+
+    total_tunneling_current_A = 0.0
+
+    minimum_local_current_density_A_cm2 = None
+
+    maximum_local_current_density_A_cm2 = 0.0
+
+    maximum_local_field_abs_V_cm = 0.0
+
+    edge_results = []
+
+    for edge in edge_data:
+        edge_field_signed_V_cm = float(
+            edge[
+                "radial_field_outward_V_cm"
+            ]
+        )
+
+        edge_area_cm2 = float(
+            edge[
+                "cylindrical_interface_area_cm2"
+            ]
+        )
+
+        if edge_area_cm2 <= 0.0:
+            raise RuntimeError(
+                "An interface edge has a non-positive area."
+            )
+
+        tunneling_result = (
+            evaluate_tunneling_current_density(
+                electric_field_V_cm=(
+                    edge_field_signed_V_cm
+                )
+            )
+        )
+
+        validate_tunneling_result(
+            tunneling_result
+        )
+
+        local_current_density_A_cm2 = float(
+            tunneling_result[
+                "total_tunneling_current_density_A_cm2"
+            ]
+        )
+
+        local_tunneling_current_A = (
+            local_current_density_A_cm2
+            * edge_area_cm2
+        )
+
+        total_tunneling_current_A += (
+            local_tunneling_current_A
+        )
+
+        maximum_local_current_density_A_cm2 = max(
+            maximum_local_current_density_A_cm2,
+            local_current_density_A_cm2,
+        )
+
+        if (
+            minimum_local_current_density_A_cm2
+            is None
+        ):
+            minimum_local_current_density_A_cm2 = (
+                local_current_density_A_cm2
+            )
+
+        else:
+            minimum_local_current_density_A_cm2 = min(
+                minimum_local_current_density_A_cm2,
+                local_current_density_A_cm2,
+            )
+
+        maximum_local_field_abs_V_cm = max(
+            maximum_local_field_abs_V_cm,
+            abs(
+                edge_field_signed_V_cm
+            ),
+        )
+
+        edge_results.append(
+            {
+                "edge_index": (
+                    edge[
+                        "edge_index"
+                    ]
+                ),
+
+                "midpoint_axial_nm": (
+                    edge[
+                        "midpoint_axial_nm"
+                    ]
+                ),
+
+                "axial_segment_lower_nm": (
+                    edge[
+                        "axial_segment_lower_nm"
+                    ]
+                ),
+
+                "axial_segment_upper_nm": (
+                    edge[
+                        "axial_segment_upper_nm"
+                    ]
+                ),
+
+                "axial_segment_length_nm": (
+                    edge[
+                        "axial_segment_length_nm"
+                    ]
+                ),
+
+                "interface_radius_nm": (
+                    edge[
+                        "interface_radius_nm"
+                    ]
+                ),
+
+                "interface_area_cm2": (
+                    edge_area_cm2
+                ),
+
+                "electric_field_signed_V_cm": (
+                    edge_field_signed_V_cm
+                ),
+
+                "electric_field_abs_V_cm": (
+                    abs(
+                        edge_field_signed_V_cm
+                    )
+                ),
+
+                "fowler_nordheim_exponent": (
+                    tunneling_result[
+                        "fowler_nordheim_exponent"
+                    ]
+                ),
+
+                "fowler_nordheim_current_density_A_cm2": (
+                    tunneling_result[
+                        "fowler_nordheim_current_density_A_cm2"
+                    ]
+                ),
+
+                "total_tunneling_current_density_A_cm2": (
+                    local_current_density_A_cm2
+                ),
+
+                "local_tunneling_current_A": (
+                    local_tunneling_current_A
+                ),
+            }
+        )
+
+    effective_current_density_A_cm2 = (
+        total_tunneling_current_A
+        / total_interface_area_cm2
+    )
+
+    total_injected_charge_C = (
+        total_tunneling_current_A
+        * program_time_s
+    )
+
+    total_injected_electron_count = (
+        total_injected_charge_C
+        / tunnel_params.q
+    )
+
+    area_averaged_injected_charge_density_C_cm2 = (
+        effective_current_density_A_cm2
+        * program_time_s
+    )
+
+    area_averaged_injected_electron_sheet_density_cm2 = (
+        area_averaged_injected_charge_density_C_cm2
+        / tunnel_params.q
+    )
+
+    return {
+        "edge_count": (
+            len(edge_results)
+        ),
+
+        "edge_results": (
+            edge_results
+        ),
+
+        "active_axial_minimum_nm": (
+            active_interface_statistics[
+                "active_axial_minimum_nm"
+            ]
+        ),
+
+        "active_axial_maximum_nm": (
+            active_interface_statistics[
+                "active_axial_maximum_nm"
+            ]
+        ),
+
+        "total_interface_area_cm2": (
+            total_interface_area_cm2
+        ),
+
+        "total_tunneling_current_A": (
+            total_tunneling_current_A
+        ),
+
+        "effective_current_density_A_cm2": (
+            effective_current_density_A_cm2
+        ),
+
+        "minimum_local_current_density_A_cm2": (
+            minimum_local_current_density_A_cm2
+        ),
+
+        "maximum_local_current_density_A_cm2": (
+            maximum_local_current_density_A_cm2
+        ),
+
+        "maximum_local_field_abs_V_cm": (
+            maximum_local_field_abs_V_cm
+        ),
+
+        "program_time_s": (
+            program_time_s
+        ),
+
+        "total_injected_charge_C": (
+            total_injected_charge_C
+        ),
+
+        "total_injected_electron_count": (
+            total_injected_electron_count
+        ),
+
+        "area_averaged_injected_charge_density_C_cm2": (
+            area_averaged_injected_charge_density_C_cm2
+        ),
+
+        "area_averaged_injected_electron_sheet_density_cm2": (
+            area_averaged_injected_electron_sheet_density_cm2
+        ),
+    }
+
+
+def print_edge_resolved_tunneling_result(
+    result,
+):
+    print()
+    print(
+        "EDGE-RESOLVED ACTIVE-INTERFACE TUNNELING"
+    )
+
+    print(
+        f'  selected edge count       = '
+        f'{result["edge_count"]}'
+    )
+
+    print(
+        f'  active axial range        = '
+        f'{result["active_axial_minimum_nm"]:.3f} '
+        f'to '
+        f'{result["active_axial_maximum_nm"]:.3f} nm'
+    )
+
+    print(
+        f'  total interface area      = '
+        f'{result["total_interface_area_cm2"]:.6e} cm^2'
+    )
+
+    print(
+        f'  maximum local field       = '
+        f'{result["maximum_local_field_abs_V_cm"]:.6e} '
+        f'V/cm'
+    )
+
+    print(
+        f'  minimum local J           = '
+        f'{result["minimum_local_current_density_A_cm2"]:.6e} '
+        f'A/cm^2'
+    )
+
+    print(
+        f'  maximum local J           = '
+        f'{result["maximum_local_current_density_A_cm2"]:.6e} '
+        f'A/cm^2'
+    )
+
+    print(
+        f'  effective current density = '
+        f'{result["effective_current_density_A_cm2"]:.6e} '
+        f'A/cm^2'
+    )
+
+    print(
+        f'  total tunneling current   = '
+        f'{result["total_tunneling_current_A"]:.6e} A'
+    )
+
+    print(
+        f'  total injected charge     = '
+        f'{result["total_injected_charge_C"]:.6e} C'
+    )
+
+    print(
+        f'  injected electron count   = '
+        f'{result["total_injected_electron_count"]:.6e}'
+    )
+
+    print(
+        f'  average injected sheet N  = '
+        f'{result["area_averaged_injected_electron_sheet_density_cm2"]:.6e} '
+        f'cm^-2'
+    )
+
+
+# ============================================================
 # Main simulation
 # ============================================================
 
@@ -318,7 +895,11 @@ def main():
         "STEP 1 : CREATE DEVICE STRUCTURE"
     )
 
-    create_structure()
+    geometry = create_structure(
+        tunnel_oxide_thickness_nm=(
+            TUNNEL_OXIDE_THICKNESS_NM
+        ),
+    )
 
     verify_device_structure()
 
@@ -459,10 +1040,10 @@ def main():
 
 
     print_section(
-        "STEP 15 : POSITIVE GATE FIELD SWEEP"
+        "STEP 15 : POSITIVE GATE FIELD AND TUNNELING SWEEP"
     )
 
-    OUTPUT_DIRECTORY.mkdir(
+    OUTPUT_CSV.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
@@ -501,38 +1082,171 @@ def main():
             )
         )
 
+        active_tunnel_interface_statistics = (
+            get_active_inner_interface_radial_field_statistics(
+                device=device,
+                region="TunnelOxide",
+                minimum_axial_nm=(
+                    ACTIVE_AXIAL_MINIMUM_NM
+                ),
+                maximum_axial_nm=(
+                    ACTIVE_AXIAL_MAXIMUM_NM
+                ),
+            )
+        )
+
+        interface_tunneling = (
+            evaluate_interface_tunneling(
+                tunnel_interface_statistics
+            )
+        )
+
+        edge_resolved_tunneling = (
+            evaluate_edge_resolved_interface_tunneling(
+                active_tunnel_interface_statistics
+            )
+        )
+
+        tunneling_result = (
+            interface_tunneling[
+                "tunneling_result"
+            ]
+        )
+
+        program_time_s = (
+            interface_tunneling[
+                "program_time_s"
+            ]
+        )
+
+        injected_charge_density_C_cm2 = (
+            interface_tunneling[
+                "injected_charge_density_C_cm2"
+            ]
+        )
+
+        injected_electron_sheet_density_cm2 = (
+            interface_tunneling[
+                "injected_electron_sheet_density_cm2"
+            ]
+        )
+
         print()
         print(
             f"FIELD RESULT: "
+            f"TOX = "
+            f"{geometry['tunnel_oxide_thickness_nm']:.3f} nm, "
             f"VG = {current_gate_voltage:+.3f} V, "
             f"VD = {current_drain_voltage:+.3f} V, "
             f"ID = {drain_current:+.6e} A"
         )
 
         for region in DIELECTRIC_REGIONS:
-            statistics = (
-                dielectric_statistics[region]
-            )
-
             print_region_field_statistics(
-                statistics=statistics,
+                statistics=(
+                    dielectric_statistics[
+                        region
+                    ]
+                ),
             )
 
         print()
         print(
-            "MoS2 / TunnelOxide interface-near field"
+            "Full-channel MoS2 / TunnelOxide interface"
         )
 
         print_inner_interface_field_statistics(
-            statistics=tunnel_interface_statistics,
+            statistics=(
+                tunnel_interface_statistics
+            ),
+        )
+
+        print()
+        print(
+            "Active MoS2 / TunnelOxide interface"
+        )
+
+        print_active_interface_field_statistics(
+            statistics=(
+                active_tunnel_interface_statistics
+            ),
+        )
+
+        print()
+        print(
+            "MEAN-FIELD TUNNELING APPROXIMATION"
+        )
+
+        print_tunneling_result(
+            result=tunneling_result,
+        )
+
+        print()
+        print(
+            f"Program time = "
+            f"{program_time_s:.6e} s"
+        )
+
+        print(
+            f"Mean-field injected charge density = "
+            f"{injected_charge_density_C_cm2:.6e} "
+            f"C/cm^2"
+        )
+
+        print(
+            f"Mean-field injected electron sheet density = "
+            f"{injected_electron_sheet_density_cm2:.6e} "
+            f"cm^-2"
+        )
+
+        print_edge_resolved_tunneling_result(
+            result=edge_resolved_tunneling,
         )
 
         for region in DIELECTRIC_REGIONS:
             statistics = (
-                dielectric_statistics[region]
+                dielectric_statistics[
+                    region
+                ]
             )
 
             result_row = {
+                "tunnel_oxide_thickness_nm": (
+                    geometry[
+                        "tunnel_oxide_thickness_nm"
+                    ]
+                ),
+
+                "charge_trap_thickness_nm": (
+                    geometry[
+                        "charge_trap_thickness_nm"
+                    ]
+                ),
+
+                "blocking_oxide_thickness_nm": (
+                    geometry[
+                        "blocking_oxide_thickness_nm"
+                    ]
+                ),
+
+                "mos2_outer_radius_nm": (
+                    geometry[
+                        "mos2_outer_radius_nm"
+                    ]
+                ),
+
+                "tunnel_oxide_outer_radius_nm": (
+                    geometry[
+                        "tunnel_oxide_outer_radius_nm"
+                    ]
+                ),
+
+                "gate_outer_radius_nm": (
+                    geometry[
+                        "gate_outer_radius_nm"
+                    ]
+                ),
+
                 "gate_voltage_V": (
                     current_gate_voltage
                 ),
@@ -549,30 +1263,44 @@ def main():
                     drain_current
                 ),
 
-                "region": region,
+                "region": (
+                    region
+                ),
 
                 "edge_count": (
-                    statistics["edge_count"]
+                    statistics[
+                        "edge_count"
+                    ]
                 ),
 
                 "total_edge_count": (
-                    statistics["total_edge_count"]
+                    statistics[
+                        "total_edge_count"
+                    ]
                 ),
 
                 "radial_edge_count": (
-                    statistics["radial_edge_count"]
+                    statistics[
+                        "radial_edge_count"
+                    ]
                 ),
 
                 "axial_edge_count": (
-                    statistics["axial_edge_count"]
+                    statistics[
+                        "axial_edge_count"
+                    ]
                 ),
 
                 "diagonal_edge_count": (
-                    statistics["diagonal_edge_count"]
+                    statistics[
+                        "diagonal_edge_count"
+                    ]
                 ),
 
                 "degenerate_edge_count": (
-                    statistics["degenerate_edge_count"]
+                    statistics[
+                        "degenerate_edge_count"
+                    ]
                 ),
 
                 "field_min_V_cm": (
@@ -670,6 +1398,170 @@ def main():
                         "field_max_abs_V_cm"
                     ]
                 ),
+
+                "active_axial_minimum_nm": (
+                    edge_resolved_tunneling[
+                        "active_axial_minimum_nm"
+                    ]
+                ),
+
+                "active_axial_maximum_nm": (
+                    edge_resolved_tunneling[
+                        "active_axial_maximum_nm"
+                    ]
+                ),
+
+                "active_interface_edge_count": (
+                    edge_resolved_tunneling[
+                        "edge_count"
+                    ]
+                ),
+
+                "active_interface_area_cm2": (
+                    edge_resolved_tunneling[
+                        "total_interface_area_cm2"
+                    ]
+                ),
+
+                "active_interface_field_mean_signed_V_cm": (
+                    active_tunnel_interface_statistics[
+                        "field_mean_signed_V_cm"
+                    ]
+                ),
+
+                "active_interface_field_mean_abs_V_cm": (
+                    active_tunnel_interface_statistics[
+                        "field_mean_abs_V_cm"
+                    ]
+                ),
+
+                "active_interface_field_area_weighted_signed_V_cm": (
+                    active_tunnel_interface_statistics[
+                        "area_weighted_field_mean_signed_V_cm"
+                    ]
+                ),
+
+                "active_interface_field_area_weighted_abs_V_cm": (
+                    active_tunnel_interface_statistics[
+                        "area_weighted_field_mean_abs_V_cm"
+                    ]
+                ),
+
+                "active_interface_field_max_abs_V_cm": (
+                    active_tunnel_interface_statistics[
+                        "field_max_abs_V_cm"
+                    ]
+                ),
+
+                "tunneling_barrier_height_eV": (
+                    tunnel_params.BARRIER_HEIGHT_EV
+                ),
+
+                "tunneling_effective_mass_ratio": (
+                    tunnel_params.TUNNEL_EFFECTIVE_MASS_RATIO
+                ),
+
+                "program_time_s": (
+                    program_time_s
+                ),
+
+                "fowler_nordheim_exponent": (
+                    tunneling_result[
+                        "fowler_nordheim_exponent"
+                    ]
+                ),
+
+                "fowler_nordheim_current_density_A_cm2": (
+                    tunneling_result[
+                        "fowler_nordheim_current_density_A_cm2"
+                    ]
+                ),
+
+                "signed_fowler_nordheim_current_density_A_cm2": (
+                    tunneling_result[
+                        "signed_fowler_nordheim_current_density_A_cm2"
+                    ]
+                ),
+
+                "direct_tunneling_current_density_A_cm2": (
+                    tunneling_result[
+                        "direct_tunneling_current_density_A_cm2"
+                    ]
+                ),
+
+                "trap_assisted_tunneling_current_density_A_cm2": (
+                    tunneling_result[
+                        "trap_assisted_tunneling_current_density_A_cm2"
+                    ]
+                ),
+
+                "total_tunneling_current_density_A_cm2": (
+                    tunneling_result[
+                        "total_tunneling_current_density_A_cm2"
+                    ]
+                ),
+
+                "injected_charge_density_C_cm2": (
+                    injected_charge_density_C_cm2
+                ),
+
+                "injected_electron_sheet_density_cm2": (
+                    injected_electron_sheet_density_cm2
+                ),
+
+                "edge_resolved_effective_current_density_A_cm2": (
+                    edge_resolved_tunneling[
+                        "effective_current_density_A_cm2"
+                    ]
+                ),
+
+                "edge_resolved_total_tunneling_current_A": (
+                    edge_resolved_tunneling[
+                        "total_tunneling_current_A"
+                    ]
+                ),
+
+                "edge_resolved_minimum_local_current_density_A_cm2": (
+                    edge_resolved_tunneling[
+                        "minimum_local_current_density_A_cm2"
+                    ]
+                ),
+
+                "edge_resolved_maximum_local_current_density_A_cm2": (
+                    edge_resolved_tunneling[
+                        "maximum_local_current_density_A_cm2"
+                    ]
+                ),
+
+                "edge_resolved_maximum_local_field_abs_V_cm": (
+                    edge_resolved_tunneling[
+                        "maximum_local_field_abs_V_cm"
+                    ]
+                ),
+
+                "edge_resolved_total_injected_charge_C": (
+                    edge_resolved_tunneling[
+                        "total_injected_charge_C"
+                    ]
+                ),
+
+                "edge_resolved_total_injected_electron_count": (
+                    edge_resolved_tunneling[
+                        "total_injected_electron_count"
+                    ]
+                ),
+
+                "edge_resolved_average_injected_charge_density_C_cm2": (
+                    edge_resolved_tunneling[
+                        "area_averaged_injected_charge_density_C_cm2"
+                    ]
+                ),
+
+                "edge_resolved_average_injected_electron_sheet_density_cm2": (
+                    edge_resolved_tunneling[
+                        "area_averaged_injected_electron_sheet_density_cm2"
+                    ]
+                ),
             }
 
             results.append(
@@ -678,10 +1570,16 @@ def main():
 
 
     print_section(
-        "STEP 16 : SAVE FIELD RESULTS"
+        "STEP 16 : SAVE FIELD AND TUNNELING RESULTS"
     )
 
     field_names = (
+        "tunnel_oxide_thickness_nm",
+        "charge_trap_thickness_nm",
+        "blocking_oxide_thickness_nm",
+        "mos2_outer_radius_nm",
+        "tunnel_oxide_outer_radius_nm",
+        "gate_outer_radius_nm",
         "gate_voltage_V",
         "drain_voltage_V",
         "trap_density_cm3",
@@ -709,6 +1607,35 @@ def main():
         "tunnel_interface_field_mean_signed_V_cm",
         "tunnel_interface_field_mean_abs_V_cm",
         "tunnel_interface_field_max_abs_V_cm",
+        "active_axial_minimum_nm",
+        "active_axial_maximum_nm",
+        "active_interface_edge_count",
+        "active_interface_area_cm2",
+        "active_interface_field_mean_signed_V_cm",
+        "active_interface_field_mean_abs_V_cm",
+        "active_interface_field_area_weighted_signed_V_cm",
+        "active_interface_field_area_weighted_abs_V_cm",
+        "active_interface_field_max_abs_V_cm",
+        "tunneling_barrier_height_eV",
+        "tunneling_effective_mass_ratio",
+        "program_time_s",
+        "fowler_nordheim_exponent",
+        "fowler_nordheim_current_density_A_cm2",
+        "signed_fowler_nordheim_current_density_A_cm2",
+        "direct_tunneling_current_density_A_cm2",
+        "trap_assisted_tunneling_current_density_A_cm2",
+        "total_tunneling_current_density_A_cm2",
+        "injected_charge_density_C_cm2",
+        "injected_electron_sheet_density_cm2",
+        "edge_resolved_effective_current_density_A_cm2",
+        "edge_resolved_total_tunneling_current_A",
+        "edge_resolved_minimum_local_current_density_A_cm2",
+        "edge_resolved_maximum_local_current_density_A_cm2",
+        "edge_resolved_maximum_local_field_abs_V_cm",
+        "edge_resolved_total_injected_charge_C",
+        "edge_resolved_total_injected_electron_count",
+        "edge_resolved_average_injected_charge_density_C_cm2",
+        "edge_resolved_average_injected_electron_sheet_density_cm2",
     )
 
     with OUTPUT_CSV.open(
@@ -728,17 +1655,30 @@ def main():
         )
 
     print(
-        f'Field-sweep results written to '
+        f'Field and tunneling results written to '
         f'"{OUTPUT_CSV}".'
     )
 
 
     print_section(
-        "POSITIVE FIELD SWEEP SUCCESSFUL"
+        "POSITIVE FIELD AND TUNNELING SWEEP SUCCESSFUL"
     )
 
     print(
-        f"Gate voltages: {GATE_VOLTAGES}"
+        f"TunnelOxide thickness: "
+        f"{TUNNEL_OXIDE_THICKNESS_NM:.3f} nm"
+    )
+
+    print(
+        f"Active axial window: "
+        f"{ACTIVE_AXIAL_MINIMUM_NM:.3f} "
+        f"to "
+        f"{ACTIVE_AXIAL_MAXIMUM_NM:.3f} nm"
+    )
+
+    print(
+        f"Gate voltages: "
+        f"{GATE_VOLTAGES}"
     )
 
     print(
@@ -752,8 +1692,22 @@ def main():
     )
 
     print(
-        "TunnelOxide inner-interface field "
-        "extraction completed."
+        f"Program time: "
+        f"{tunnel_params.PROGRAM_TIME_S:.3e} s"
+    )
+
+    print(
+        f"Barrier height: "
+        f"{tunnel_params.BARRIER_HEIGHT_EV:.3f} eV"
+    )
+
+    print(
+        f"Effective mass ratio: "
+        f"{tunnel_params.TUNNEL_EFFECTIVE_MASS_RATIO:.3f}"
+    )
+
+    print(
+        f'Output CSV: "{OUTPUT_CSV}"'
     )
 
 

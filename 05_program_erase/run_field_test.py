@@ -33,7 +33,6 @@
 import csv
 import math
 from pathlib import Path
-import statistics
 
 from devsim import (
     get_contact_current,
@@ -72,8 +71,12 @@ from trap_models import (
     set_trapped_electron_density,
 )
 
-import trap_parameters as tp
+from field_extraction import (
+    print_dielectric_field_statistics,
+)
 
+
+import trap_parameters as tp
 
 # ============================================================
 # Output paths
@@ -1115,22 +1118,6 @@ for (
             "abs_drain_current_A": (
                 absolute_drain_current
             ),
-            "total_edge_count": (
-                statistics["total_edge_count"]
-            ),
-            "radial_edge_count": (
-                statistics["radial_edge_count"]
-            ),
-            "axial_edge_count": (
-                statistics["axial_edge_count"]
-            ),
-            "diagonal_edge_count": (
-                statistics["diagonal_edge_count"]
-            ),
-            "degenerate_edge_count": (
-                statistics["degenerate_edge_count"]
-            ),
-        
         }
 
         state_iv_results.append(
@@ -1294,22 +1281,13 @@ with THRESHOLD_SUMMARY_CSV.open(
 ) as csv_file:
 
     fieldnames = (
-       "gate_voltage_V",
-        "drain_voltage_V",
+        "state_index",
+        "state_label",
         "trap_density_cm3",
-        "drain_current_A",
-        "region",
-        "edge_count",
-        "total_edge_count",
-        "radial_edge_count",
-        "axial_edge_count",
-        "diagonal_edge_count",
-        "degenerate_edge_count",
-        "field_min_V_cm",
-        "field_max_V_cm",
-        "field_mean_signed_V_cm",
-        "field_mean_abs_V_cm",
-        "field_max_abs_V_cm",
+        "trap_sheet_density_cm2",
+        "threshold_current_A",
+        "threshold_voltage_V",
+        "threshold_shift_from_empty_V",
     )
 
     writer = csv.DictWriter(
@@ -1461,3 +1439,28 @@ print(
     "SIMULATION SUCCESSFUL"
 )
 print("=" * 70)
+
+
+from field_extraction import (
+    print_dielectric_field_statistics,
+)
+
+
+# ============================================================
+# Dielectric electric-field inspection
+# ============================================================
+
+print_section(
+    "STEP 24 : DIELECTRIC ELECTRIC-FIELD ANALYSIS"
+)
+
+dielectric_field_results = (
+    print_dielectric_field_statistics(
+        device=device,
+    )
+)
+
+print()
+print(
+    "Dielectric electric-field extraction completed."
+)

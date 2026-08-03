@@ -13,7 +13,11 @@
 #   4. Calculate radial-field statistics
 #   5. Extract the innermost radial edge layer
 #      near the MoS2 / TunnelOxide interface
+#   6. Filter the interface edges by an active axial window
+#   7. Calculate cylindrical interface-area weights
 # ============================================================
+
+import math
 
 from devsim import (
     edge_from_node_model,
@@ -35,12 +39,31 @@ DIELECTRIC_REGIONS = (
 
 
 # ============================================================
+# Unit conversion
+# ============================================================
+
+NM_TO_CM = 1.0e-7
+CM_TO_NM = 1.0e7
+
+
+# ============================================================
 # Numerical settings
 # ============================================================
 
 EDGE_DIRECTION_TOLERANCE_CM = 1.0e-15
 
 INNER_INTERFACE_RADIUS_TOLERANCE_CM = 1.0e-15
+
+
+# ============================================================
+# Default active interface window
+#
+# The full simulated channel extends from 0 to 100 nm.
+# The initial active window excludes source/drain fringe areas.
+# ============================================================
+
+DEFAULT_ACTIVE_AXIAL_MINIMUM_NM = 10.0
+DEFAULT_ACTIVE_AXIAL_MAXIMUM_NM = 90.0
 
 
 # ============================================================
@@ -365,14 +388,13 @@ def add_edge_direction_information(
     DEVSIM's ElectricField edge value follows the mesh edge's
     n0-to-n1 orientation. Mesh edge orientation can vary.
 
-    To compare all radial edges consistently, this function
-    converts the field sign to the following convention:
+    Sign convention
+    ---------------
+    Positive radial field:
+        cylinder center -> gate
 
-        positive radial field:
-            cylinder center -> gate
-
-        negative radial field:
-            gate -> cylinder center
+    Negative radial field:
+        gate -> cylinder center
     """
 
     classified_data = []
@@ -496,6 +518,77 @@ def calculate_field_statistics(
     }
 
 
+def calculate_area_weighted_field_statistics(
+    edge_data,
+):
+    """
+    Calculate area-weighted field statistics.
+
+    Each edge dictionary must contain:
+        radial_field_outward_V_cm
+        cylindrical_interface_area_cm2
+    """
+
+    if not edge_data:
+        raise ValueError(
+            "Interface edge-data list is empty."
+        )
+
+    total_area_cm2 = sum(
+        float(
+            edge[
+                "cylindrical_interface_area_cm2"
+            ]
+        )
+        for edge in edge_data
+    )
+
+    if total_area_cm2 <= 0.0:
+        raise ValueError(
+            "Total cylindrical interface area must be positive."
+        )
+
+    weighted_signed_sum = 0.0
+    weighted_absolute_sum = 0.0
+
+    for edge in edge_data:
+        field_value = float(
+            edge[
+                "radial_field_outward_V_cm"
+            ]
+        )
+
+        area_value = float(
+            edge[
+                "cylindrical_interface_area_cm2"
+            ]
+        )
+
+        weighted_signed_sum += (
+            field_value
+            * area_value
+        )
+
+        weighted_absolute_sum += (
+            abs(field_value)
+            * area_value
+        )
+
+    return {
+        "area_weighted_field_mean_signed_V_cm": (
+            weighted_signed_sum
+            / total_area_cm2
+        ),
+        "area_weighted_field_mean_abs_V_cm": (
+            weighted_absolute_sum
+            / total_area_cm2
+        ),
+        "total_interface_area_cm2": (
+            total_area_cm2
+        ),
+    }
+
+
 def get_region_radial_field_statistics(
     device,
     region,
@@ -612,14 +705,6 @@ def get_inner_interface_radial_edges(
     For TunnelOxide, this corresponds to the radial mesh layer
     closest to the MoS2 / TunnelOxide interface.
 
-    Selection procedure
-    -------------------
-    1. Extract every edge in the requested region.
-    2. Retain radial edges only.
-    3. Calculate the inner endpoint radius of every radial edge.
-    4. Find the minimum inner radius.
-    5. Select radial edges located at that radius.
-
     Returns
     -------
     list[dict]
@@ -707,6 +792,12 @@ def get_inner_interface_radial_edges(
             f'in region "{region}".'
         )
 
+    interface_edges.sort(
+        key=lambda edge: (
+            edge["midpoint_axial_cm"]
+        )
+    )
+
     return interface_edges
 
 
@@ -718,12 +809,6 @@ def get_inner_interface_radial_field_statistics(
     """
     Calculate radial electric-field statistics at the innermost
     radial mesh layer of a region.
-
-    For TunnelOxide, the extracted value represents the field
-    immediately adjacent to the MoS2 / TunnelOxide interface.
-
-    This field will later be used as an input for tunneling
-    current-density calculations.
     """
 
     interface_edges = (
@@ -804,23 +889,490 @@ def get_inner_interface_radial_field_statistics(
     )
 
     statistics["inner_radius_nm"] = (
-        inner_radius_cm * 1.0e7
+        inner_radius_cm
+        * CM_TO_NM
     )
 
     statistics["outer_radius_nm"] = (
-        outer_radius_cm * 1.0e7
+        outer_radius_cm
+        * CM_TO_NM
     )
 
     statistics["midpoint_radius_nm"] = (
-        midpoint_radius_cm * 1.0e7
+        midpoint_radius_cm
+        * CM_TO_NM
     )
 
     statistics["minimum_axial_nm"] = (
-        minimum_axial_cm * 1.0e7
+        minimum_axial_cm
+        * CM_TO_NM
     )
 
     statistics["maximum_axial_nm"] = (
-        maximum_axial_cm * 1.0e7
+        maximum_axial_cm
+        * CM_TO_NM
+    )
+
+    statistics["edge_data"] = (
+        interface_edges
+    )
+
+    return statistics
+
+
+# ============================================================
+# Active axial-window validation
+# ============================================================
+
+def validate_active_axial_window(
+    minimum_axial_nm,
+    maximum_axial_nm,
+):
+    """
+    Validate the selected active axial range.
+    """
+
+    minimum_axial_nm = float(
+        minimum_axial_nm
+    )
+
+    maximum_axial_nm = float(
+        maximum_axial_nm
+    )
+
+    if not math.isfinite(
+        minimum_axial_nm
+    ):
+        raise ValueError(
+            "minimum_axial_nm must be finite."
+        )
+
+    if not math.isfinite(
+        maximum_axial_nm
+    ):
+        raise ValueError(
+            "maximum_axial_nm must be finite."
+        )
+
+    if minimum_axial_nm < 0.0:
+        raise ValueError(
+            "minimum_axial_nm must not be negative."
+        )
+
+    if maximum_axial_nm <= minimum_axial_nm:
+        raise ValueError(
+            "maximum_axial_nm must be greater than "
+            "minimum_axial_nm."
+        )
+
+    return (
+        minimum_axial_nm,
+        maximum_axial_nm,
+    )
+
+
+# ============================================================
+# Cylindrical interface-area weighting
+# ============================================================
+
+def add_cylindrical_interface_area_weights(
+    interface_edges,
+    minimum_axial_cm,
+    maximum_axial_cm,
+):
+    """
+    Assign a representative axial segment and cylindrical
+    interface area to every selected interface edge.
+
+    The axial segment boundaries are constructed midway between
+    adjacent edge midpoint positions. The first and last
+    boundaries are clipped to the selected active window.
+
+    Area for edge i:
+        A_i = 2 * pi * r_i * delta_z_i
+    """
+
+    if not interface_edges:
+        raise ValueError(
+            "Interface edge list is empty."
+        )
+
+    sorted_edges = sorted(
+        interface_edges,
+        key=lambda edge: (
+            edge["midpoint_axial_cm"]
+        ),
+    )
+
+    midpoint_values = [
+        float(
+            edge["midpoint_axial_cm"]
+        )
+        for edge in sorted_edges
+    ]
+
+    weighted_edges = []
+
+    for edge_index, edge in enumerate(
+        sorted_edges
+    ):
+        midpoint_axial_cm = (
+            midpoint_values[edge_index]
+        )
+
+        if edge_index == 0:
+            lower_boundary_cm = (
+                minimum_axial_cm
+            )
+        else:
+            lower_boundary_cm = (
+                0.5
+                * (
+                    midpoint_values[
+                        edge_index - 1
+                    ]
+                    + midpoint_axial_cm
+                )
+            )
+
+        if edge_index == (
+            len(sorted_edges) - 1
+        ):
+            upper_boundary_cm = (
+                maximum_axial_cm
+            )
+        else:
+            upper_boundary_cm = (
+                0.5
+                * (
+                    midpoint_axial_cm
+                    + midpoint_values[
+                        edge_index + 1
+                    ]
+                )
+            )
+
+        lower_boundary_cm = max(
+            lower_boundary_cm,
+            minimum_axial_cm,
+        )
+
+        upper_boundary_cm = min(
+            upper_boundary_cm,
+            maximum_axial_cm,
+        )
+
+        axial_segment_length_cm = (
+            upper_boundary_cm
+            - lower_boundary_cm
+        )
+
+        if axial_segment_length_cm <= 0.0:
+            raise RuntimeError(
+                "Calculated axial segment length is "
+                "not positive."
+            )
+
+        interface_radius_cm = float(
+            edge["inner_radius_cm"]
+        )
+
+        cylindrical_interface_area_cm2 = (
+            2.0
+            * math.pi
+            * interface_radius_cm
+            * axial_segment_length_cm
+        )
+
+        enriched_edge = dict(
+            edge
+        )
+
+        enriched_edge[
+            "midpoint_axial_nm"
+        ] = (
+            midpoint_axial_cm
+            * CM_TO_NM
+        )
+
+        enriched_edge[
+            "axial_segment_lower_cm"
+        ] = (
+            lower_boundary_cm
+        )
+
+        enriched_edge[
+            "axial_segment_upper_cm"
+        ] = (
+            upper_boundary_cm
+        )
+
+        enriched_edge[
+            "axial_segment_lower_nm"
+        ] = (
+            lower_boundary_cm
+            * CM_TO_NM
+        )
+
+        enriched_edge[
+            "axial_segment_upper_nm"
+        ] = (
+            upper_boundary_cm
+            * CM_TO_NM
+        )
+
+        enriched_edge[
+            "axial_segment_length_cm"
+        ] = (
+            axial_segment_length_cm
+        )
+
+        enriched_edge[
+            "axial_segment_length_nm"
+        ] = (
+            axial_segment_length_cm
+            * CM_TO_NM
+        )
+
+        enriched_edge[
+            "interface_radius_cm"
+        ] = (
+            interface_radius_cm
+        )
+
+        enriched_edge[
+            "interface_radius_nm"
+        ] = (
+            interface_radius_cm
+            * CM_TO_NM
+        )
+
+        enriched_edge[
+            "cylindrical_interface_area_cm2"
+        ] = (
+            cylindrical_interface_area_cm2
+        )
+
+        weighted_edges.append(
+            enriched_edge
+        )
+
+    return weighted_edges
+
+
+# ============================================================
+# Active inner-interface extraction
+# ============================================================
+
+def get_active_inner_interface_radial_edges(
+    device,
+    region,
+    field_model="ElectricField",
+    minimum_axial_nm=(
+        DEFAULT_ACTIVE_AXIAL_MINIMUM_NM
+    ),
+    maximum_axial_nm=(
+        DEFAULT_ACTIVE_AXIAL_MAXIMUM_NM
+    ),
+):
+    """
+    Select inner-interface radial edges inside an active axial
+    window and assign cylindrical interface-area weights.
+
+    For TunnelOxide, these edges represent the field near the
+    MoS2 / TunnelOxide interface after excluding the source and
+    drain fringe regions.
+    """
+
+    (
+        minimum_axial_nm,
+        maximum_axial_nm,
+    ) = validate_active_axial_window(
+        minimum_axial_nm=minimum_axial_nm,
+        maximum_axial_nm=maximum_axial_nm,
+    )
+
+    minimum_axial_cm = (
+        minimum_axial_nm
+        * NM_TO_CM
+    )
+
+    maximum_axial_cm = (
+        maximum_axial_nm
+        * NM_TO_CM
+    )
+
+    interface_edges = (
+        get_inner_interface_radial_edges(
+            device=device,
+            region=region,
+            field_model=field_model,
+        )
+    )
+
+    active_edges = []
+
+    for edge in interface_edges:
+        midpoint_axial_cm = float(
+            edge["midpoint_axial_cm"]
+        )
+
+        if (
+            midpoint_axial_cm
+            < minimum_axial_cm
+        ):
+            continue
+
+        if (
+            midpoint_axial_cm
+            > maximum_axial_cm
+        ):
+            continue
+
+        active_edges.append(
+            dict(edge)
+        )
+
+    if not active_edges:
+        raise RuntimeError(
+            f"No active inner-interface edges were found "
+            f'in region "{region}" between '
+            f"{minimum_axial_nm:.3f} and "
+            f"{maximum_axial_nm:.3f} nm."
+        )
+
+    weighted_active_edges = (
+        add_cylindrical_interface_area_weights(
+            interface_edges=active_edges,
+            minimum_axial_cm=minimum_axial_cm,
+            maximum_axial_cm=maximum_axial_cm,
+        )
+    )
+
+    return weighted_active_edges
+
+
+def get_active_inner_interface_radial_field_statistics(
+    device,
+    region,
+    field_model="ElectricField",
+    minimum_axial_nm=(
+        DEFAULT_ACTIVE_AXIAL_MINIMUM_NM
+    ),
+    maximum_axial_nm=(
+        DEFAULT_ACTIVE_AXIAL_MAXIMUM_NM
+    ),
+):
+    """
+    Calculate active-window interface field statistics.
+
+    Returns both ordinary edge-count averages and cylindrical
+    interface-area-weighted averages.
+
+    The returned edge_data can be used for edge-resolved
+    tunneling-current calculations.
+    """
+
+    (
+        minimum_axial_nm,
+        maximum_axial_nm,
+    ) = validate_active_axial_window(
+        minimum_axial_nm=minimum_axial_nm,
+        maximum_axial_nm=maximum_axial_nm,
+    )
+
+    active_edges = (
+        get_active_inner_interface_radial_edges(
+            device=device,
+            region=region,
+            field_model=field_model,
+            minimum_axial_nm=minimum_axial_nm,
+            maximum_axial_nm=maximum_axial_nm,
+        )
+    )
+
+    field_values = [
+        edge[
+            "radial_field_outward_V_cm"
+        ]
+        for edge in active_edges
+    ]
+
+    statistics = calculate_field_statistics(
+        values=field_values,
+    )
+
+    weighted_statistics = (
+        calculate_area_weighted_field_statistics(
+            edge_data=active_edges,
+        )
+    )
+
+    interface_radius_cm = (
+        sum(
+            edge["interface_radius_cm"]
+            for edge in active_edges
+        )
+        / len(active_edges)
+    )
+
+    selected_midpoint_values_nm = [
+        edge["midpoint_axial_nm"]
+        for edge in active_edges
+    ]
+
+    statistics.update(
+        weighted_statistics
+    )
+
+    statistics["region"] = region
+    statistics["field_model"] = field_model
+    statistics["field_direction"] = "radial"
+
+    statistics["extraction_location"] = (
+        "active_inner_interface"
+    )
+
+    statistics["active_interface_edge_count"] = (
+        len(active_edges)
+    )
+
+    statistics["active_axial_minimum_nm"] = (
+        minimum_axial_nm
+    )
+
+    statistics["active_axial_maximum_nm"] = (
+        maximum_axial_nm
+    )
+
+    statistics["active_axial_length_nm"] = (
+        maximum_axial_nm
+        - minimum_axial_nm
+    )
+
+    statistics[
+        "selected_midpoint_minimum_axial_nm"
+    ] = min(
+        selected_midpoint_values_nm
+    )
+
+    statistics[
+        "selected_midpoint_maximum_axial_nm"
+    ] = max(
+        selected_midpoint_values_nm
+    )
+
+    statistics["interface_radius_cm"] = (
+        interface_radius_cm
+    )
+
+    statistics["interface_radius_nm"] = (
+        interface_radius_cm
+        * CM_TO_NM
+    )
+
+    statistics["edge_data"] = (
+        active_edges
     )
 
     return statistics
@@ -838,7 +1390,7 @@ def get_region_field_statistics(
     """
     Compatibility wrapper.
 
-    The default region statistics now represent radial edges.
+    The default region statistics represent radial edges.
     """
 
     return get_region_radial_field_statistics(
@@ -937,7 +1489,7 @@ def print_inner_interface_field_statistics(
     statistics,
 ):
     """
-    Print inner-interface radial electric-field statistics.
+    Print full-channel inner-interface field statistics.
     """
 
     print()
@@ -994,6 +1546,92 @@ def print_inner_interface_field_statistics(
     print(
         f'  radial absolute mean    = '
         f'{statistics["field_mean_abs_V_cm"]:.6e} V/cm'
+    )
+
+    print(
+        f'  radial maximum absolute = '
+        f'{statistics["field_max_abs_V_cm"]:.6e} V/cm'
+    )
+
+
+def print_active_interface_field_statistics(
+    statistics,
+):
+    """
+    Print active-window inner-interface field statistics.
+    """
+
+    print()
+    print(
+        f'Active interface region: '
+        f'{statistics["region"]}'
+    )
+
+    print(
+        "  extraction location     = "
+        "active inner interface"
+    )
+
+    print(
+        f'  selected edge count     = '
+        f'{statistics["active_interface_edge_count"]}'
+    )
+
+    print(
+        f'  requested axial window  = '
+        f'{statistics["active_axial_minimum_nm"]:.3f} '
+        f'to '
+        f'{statistics["active_axial_maximum_nm"]:.3f} nm'
+    )
+
+    print(
+        f'  selected midpoint range = '
+        f'{statistics["selected_midpoint_minimum_axial_nm"]:.3f} '
+        f'to '
+        f'{statistics["selected_midpoint_maximum_axial_nm"]:.3f} nm'
+    )
+
+    print(
+        f'  interface radius        = '
+        f'{statistics["interface_radius_nm"]:.6f} nm'
+    )
+
+    print(
+        f'  total interface area    = '
+        f'{statistics["total_interface_area_cm2"]:.6e} '
+        f'cm^2'
+    )
+
+    print(
+        f'  radial minimum          = '
+        f'{statistics["field_min_V_cm"]:+.6e} V/cm'
+    )
+
+    print(
+        f'  radial maximum          = '
+        f'{statistics["field_max_V_cm"]:+.6e} V/cm'
+    )
+
+    print(
+        f'  radial signed mean      = '
+        f'{statistics["field_mean_signed_V_cm"]:+.6e} V/cm'
+    )
+
+    print(
+        f'  radial absolute mean    = '
+        f'{statistics["field_mean_abs_V_cm"]:.6e} V/cm'
+    )
+
+    print(
+        f'  area-weighted signed    = '
+        f'{statistics["area_weighted_field_mean_signed_V_cm"]:+.6e} '
+        f'V/cm'
+    )
+
+    print(
+        f'  area-weighted absolute  = '
+        f'{statistics["area_weighted_field_mean_abs_V_cm"]:.6e} '
+        f'V/cm'
     )
 
     print(
