@@ -6,11 +6,13 @@
 #   x -> radial direction, r
 #   y -> channel direction, z
 #
-# This module:
-#   1. Reads ElectricField edge-model values
-#   2. Separates radial, axial, and diagonal edges
-#   3. Converts the radial field to an outward-directed value
-#   4. Calculates field statistics
+# Main functions:
+#   1. Read DEVSIM ElectricField edge-model values
+#   2. Separate radial, axial, and diagonal edges
+#   3. Convert radial fields to a consistent outward direction
+#   4. Calculate radial-field statistics
+#   5. Extract the innermost radial edge layer
+#      near the MoS2 / TunnelOxide interface
 # ============================================================
 
 from devsim import (
@@ -38,6 +40,8 @@ DIELECTRIC_REGIONS = (
 
 EDGE_DIRECTION_TOLERANCE_CM = 1.0e-15
 
+INNER_INTERFACE_RADIUS_TOLERANCE_CM = 1.0e-15
+
 
 # ============================================================
 # Model validation
@@ -49,7 +53,23 @@ def validate_region_field_model(
     field_model="ElectricField",
 ):
     """
-    Confirm that an electric-field edge model exists.
+    Confirm that the requested electric-field edge model exists.
+
+    Parameters
+    ----------
+    device : str
+        DEVSIM device name.
+
+    region : str
+        DEVSIM region name.
+
+    field_model : str
+        Name of the electric-field edge model.
+
+    Raises
+    ------
+    RuntimeError
+        If the edge model is not present in the region.
     """
 
     edge_models = get_edge_model_list(
@@ -71,13 +91,18 @@ def ensure_coordinate_edge_models(
     """
     Ensure that edge-endpoint coordinate models exist.
 
-    Required models:
-        x@n0, x@n1
-        y@n0, y@n1
+    Required models
+    ---------------
+    x@n0, x@n1
+        Radial-coordinate values at both edge endpoints.
 
-    In the cylindrical 2D mesh:
-        x = radial coordinate r
-        y = axial coordinate z
+    y@n0, y@n1
+        Axial-coordinate values at both edge endpoints.
+
+    Coordinate convention
+    ---------------------
+    x = cylindrical radial coordinate r
+    y = channel-direction coordinate z
     """
 
     node_models = get_node_model_list(
@@ -85,7 +110,10 @@ def ensure_coordinate_edge_models(
         region=region,
     )
 
-    for coordinate_name in ("x", "y"):
+    for coordinate_name in (
+        "x",
+        "y",
+    ):
         if coordinate_name not in node_models:
             raise RuntimeError(
                 f'Coordinate node model "{coordinate_name}" '
@@ -97,12 +125,12 @@ def ensure_coordinate_edge_models(
         region=region,
     )
 
-    x_models_exist = (
+    x_edge_models_exist = (
         "x@n0" in edge_models
         and "x@n1" in edge_models
     )
 
-    if not x_models_exist:
+    if not x_edge_models_exist:
         edge_from_node_model(
             device=device,
             region=region,
@@ -114,12 +142,12 @@ def ensure_coordinate_edge_models(
         region=region,
     )
 
-    y_models_exist = (
+    y_edge_models_exist = (
         "y@n0" in edge_models
         and "y@n1" in edge_models
     )
 
-    if not y_models_exist:
+    if not y_edge_models_exist:
         edge_from_node_model(
             device=device,
             region=region,
@@ -137,7 +165,12 @@ def get_edge_model_values_as_float(
     model_name,
 ):
     """
-    Read one DEVSIM edge model as a float list.
+    Read one DEVSIM edge model and return float values.
+
+    Returns
+    -------
+    list[float]
+        Edge-model values.
     """
 
     values = get_edge_model_values(
@@ -158,12 +191,12 @@ def get_region_edge_data(
     field_model="ElectricField",
 ):
     """
-    Return field and coordinate data for all edges.
+    Return electric-field and coordinate data for all edges.
 
     Returns
     -------
     list[dict]
-        One dictionary per edge.
+        One dictionary for each region edge.
     """
 
     validate_region_field_model(
@@ -279,35 +312,35 @@ def classify_edge_direction(
     tolerance_cm=EDGE_DIRECTION_TOLERANCE_CM,
 ):
     """
-    Classify one edge.
+    Classify one mesh edge according to its coordinate change.
 
-    radial:
-        delta_x != 0 and delta_y approximately 0
+    radial
+        delta_x is nonzero and delta_y is approximately zero.
 
-    axial:
-        delta_x approximately 0 and delta_y != 0
+    axial
+        delta_x is approximately zero and delta_y is nonzero.
 
-    diagonal:
-        both delta_x and delta_y are nonzero
+    diagonal
+        Both delta_x and delta_y are nonzero.
 
-    degenerate:
-        both coordinate changes are approximately zero
+    degenerate
+        Both coordinate changes are approximately zero.
     """
 
-    delta_x_abs = abs(
+    delta_x_absolute = abs(
         delta_x_cm
     )
 
-    delta_y_abs = abs(
+    delta_y_absolute = abs(
         delta_y_cm
     )
 
     x_changes = (
-        delta_x_abs > tolerance_cm
+        delta_x_absolute > tolerance_cm
     )
 
     y_changes = (
-        delta_y_abs > tolerance_cm
+        delta_y_absolute > tolerance_cm
     )
 
     if x_changes and not y_changes:
@@ -327,17 +360,19 @@ def add_edge_direction_information(
     tolerance_cm=EDGE_DIRECTION_TOLERANCE_CM,
 ):
     """
-    Add direction labels and outward radial fields.
+    Add an edge-direction label and outward radial-field value.
 
-    DEVSIM's ElectricField value is referenced to each edge's
-    n0 -> n1 orientation. Since mesh edge orientation may differ,
-    the radial field is converted to an outward-directed sign.
+    DEVSIM's ElectricField edge value follows the mesh edge's
+    n0-to-n1 orientation. Mesh edge orientation can vary.
 
-    Positive radial field:
-        directed from the cylinder axis toward the gate.
+    To compare all radial edges consistently, this function
+    converts the field sign to the following convention:
 
-    Negative radial field:
-        directed from the gate toward the cylinder axis.
+        positive radial field:
+            cylinder center -> gate
+
+        negative radial field:
+            gate -> cylinder center
     """
 
     classified_data = []
@@ -414,7 +449,18 @@ def calculate_field_statistics(
     values,
 ):
     """
-    Calculate signed and absolute field statistics.
+    Calculate signed and absolute electric-field statistics.
+
+    Parameters
+    ----------
+    values : iterable[float]
+        Electric-field values in V/cm.
+
+    Returns
+    -------
+    dict
+        Minimum, maximum, signed mean, absolute mean,
+        and maximum absolute field.
     """
 
     values = [
@@ -456,7 +502,7 @@ def get_region_radial_field_statistics(
     field_model="ElectricField",
 ):
     """
-    Extract only radial-edge electric-field statistics.
+    Extract electric-field statistics from radial edges only.
     """
 
     raw_edge_data = get_region_edge_data(
@@ -504,18 +550,23 @@ def get_region_radial_field_statistics(
     statistics["region"] = region
     statistics["field_model"] = field_model
     statistics["field_direction"] = "radial"
+
     statistics["total_edge_count"] = len(
         classified_edge_data
     )
+
     statistics["radial_edge_count"] = (
         direction_counts["radial"]
     )
+
     statistics["axial_edge_count"] = (
         direction_counts["axial"]
     )
+
     statistics["diagonal_edge_count"] = (
         direction_counts["diagonal"]
     )
+
     statistics["degenerate_edge_count"] = (
         direction_counts["degenerate"]
     )
@@ -527,7 +578,7 @@ def get_dielectric_radial_field_statistics(
     device,
 ):
     """
-    Return radial-field statistics for all dielectric layers.
+    Return radial electric-field statistics for all dielectrics.
     """
 
     results = {}
@@ -544,6 +595,238 @@ def get_dielectric_radial_field_statistics(
 
 
 # ============================================================
+# Inner-interface radial-field extraction
+# ============================================================
+
+def get_inner_interface_radial_edges(
+    device,
+    region,
+    field_model="ElectricField",
+    radius_tolerance_cm=(
+        INNER_INTERFACE_RADIUS_TOLERANCE_CM
+    ),
+):
+    """
+    Select the innermost radial-edge layer of a region.
+
+    For TunnelOxide, this corresponds to the radial mesh layer
+    closest to the MoS2 / TunnelOxide interface.
+
+    Selection procedure
+    -------------------
+    1. Extract every edge in the requested region.
+    2. Retain radial edges only.
+    3. Calculate the inner endpoint radius of every radial edge.
+    4. Find the minimum inner radius.
+    5. Select radial edges located at that radius.
+
+    Returns
+    -------
+    list[dict]
+        Radial edges belonging to the innermost mesh layer.
+    """
+
+    raw_edge_data = get_region_edge_data(
+        device=device,
+        region=region,
+        field_model=field_model,
+    )
+
+    classified_edge_data = (
+        add_edge_direction_information(
+            edge_data=raw_edge_data,
+        )
+    )
+
+    radial_edges = [
+        edge
+        for edge in classified_edge_data
+        if edge["direction"] == "radial"
+    ]
+
+    if not radial_edges:
+        raise RuntimeError(
+            f'No radial edges were found '
+            f'in region "{region}".'
+        )
+
+    radial_edges_with_position = []
+
+    for edge in radial_edges:
+        enriched_edge = dict(
+            edge
+        )
+
+        enriched_edge["inner_radius_cm"] = min(
+            edge["x_n0_cm"],
+            edge["x_n1_cm"],
+        )
+
+        enriched_edge["outer_radius_cm"] = max(
+            edge["x_n0_cm"],
+            edge["x_n1_cm"],
+        )
+
+        enriched_edge["midpoint_radius_cm"] = (
+            0.5
+            * (
+                edge["x_n0_cm"]
+                + edge["x_n1_cm"]
+            )
+        )
+
+        enriched_edge["midpoint_axial_cm"] = (
+            0.5
+            * (
+                edge["y_n0_cm"]
+                + edge["y_n1_cm"]
+            )
+        )
+
+        radial_edges_with_position.append(
+            enriched_edge
+        )
+
+    minimum_inner_radius_cm = min(
+        edge["inner_radius_cm"]
+        for edge in radial_edges_with_position
+    )
+
+    interface_edges = [
+        edge
+        for edge in radial_edges_with_position
+        if abs(
+            edge["inner_radius_cm"]
+            - minimum_inner_radius_cm
+        ) <= radius_tolerance_cm
+    ]
+
+    if not interface_edges:
+        raise RuntimeError(
+            f'No inner-interface radial edges were selected '
+            f'in region "{region}".'
+        )
+
+    return interface_edges
+
+
+def get_inner_interface_radial_field_statistics(
+    device,
+    region,
+    field_model="ElectricField",
+):
+    """
+    Calculate radial electric-field statistics at the innermost
+    radial mesh layer of a region.
+
+    For TunnelOxide, the extracted value represents the field
+    immediately adjacent to the MoS2 / TunnelOxide interface.
+
+    This field will later be used as an input for tunneling
+    current-density calculations.
+    """
+
+    interface_edges = (
+        get_inner_interface_radial_edges(
+            device=device,
+            region=region,
+            field_model=field_model,
+        )
+    )
+
+    field_values = [
+        edge["radial_field_outward_V_cm"]
+        for edge in interface_edges
+    ]
+
+    statistics = calculate_field_statistics(
+        values=field_values,
+    )
+
+    inner_radius_cm = min(
+        edge["inner_radius_cm"]
+        for edge in interface_edges
+    )
+
+    outer_radius_cm = max(
+        edge["outer_radius_cm"]
+        for edge in interface_edges
+    )
+
+    midpoint_radius_cm = (
+        sum(
+            edge["midpoint_radius_cm"]
+            for edge in interface_edges
+        )
+        / len(interface_edges)
+    )
+
+    minimum_axial_cm = min(
+        edge["midpoint_axial_cm"]
+        for edge in interface_edges
+    )
+
+    maximum_axial_cm = max(
+        edge["midpoint_axial_cm"]
+        for edge in interface_edges
+    )
+
+    statistics["region"] = region
+    statistics["field_model"] = field_model
+    statistics["field_direction"] = "radial"
+
+    statistics["extraction_location"] = (
+        "inner_interface"
+    )
+
+    statistics["inner_interface_edge_count"] = (
+        len(interface_edges)
+    )
+
+    statistics["inner_radius_cm"] = (
+        inner_radius_cm
+    )
+
+    statistics["outer_radius_cm"] = (
+        outer_radius_cm
+    )
+
+    statistics["midpoint_radius_cm"] = (
+        midpoint_radius_cm
+    )
+
+    statistics["minimum_axial_cm"] = (
+        minimum_axial_cm
+    )
+
+    statistics["maximum_axial_cm"] = (
+        maximum_axial_cm
+    )
+
+    statistics["inner_radius_nm"] = (
+        inner_radius_cm * 1.0e7
+    )
+
+    statistics["outer_radius_nm"] = (
+        outer_radius_cm * 1.0e7
+    )
+
+    statistics["midpoint_radius_nm"] = (
+        midpoint_radius_cm * 1.0e7
+    )
+
+    statistics["minimum_axial_nm"] = (
+        minimum_axial_cm * 1.0e7
+    )
+
+    statistics["maximum_axial_nm"] = (
+        maximum_axial_cm * 1.0e7
+    )
+
+    return statistics
+
+
+# ============================================================
 # Compatibility functions
 # ============================================================
 
@@ -555,7 +838,7 @@ def get_region_field_statistics(
     """
     Compatibility wrapper.
 
-    The default statistics now represent radial edges only.
+    The default region statistics now represent radial edges.
     """
 
     return get_region_radial_field_statistics(
@@ -571,7 +854,7 @@ def get_dielectric_field_statistics(
     """
     Compatibility wrapper.
 
-    The returned results now contain radial fields only.
+    Returned dielectric statistics contain radial fields only.
     """
 
     return get_dielectric_radial_field_statistics(
@@ -587,7 +870,7 @@ def print_region_field_statistics(
     statistics,
 ):
     """
-    Print one region's radial-field statistics.
+    Print one region's radial electric-field statistics.
     """
 
     print()
@@ -620,6 +903,11 @@ def print_region_field_statistics(
     )
 
     print(
+        f'  degenerate edge count  = '
+        f'{statistics["degenerate_edge_count"]}'
+    )
+
+    print(
         f'  radial minimum         = '
         f'{statistics["field_min_V_cm"]:+.6e} V/cm'
     )
@@ -645,11 +933,80 @@ def print_region_field_statistics(
     )
 
 
+def print_inner_interface_field_statistics(
+    statistics,
+):
+    """
+    Print inner-interface radial electric-field statistics.
+    """
+
+    print()
+    print(
+        f'Interface region: {statistics["region"]}'
+    )
+
+    print(
+        "  extraction location     = inner interface"
+    )
+
+    print(
+        f'  selected edge count     = '
+        f'{statistics["inner_interface_edge_count"]}'
+    )
+
+    print(
+        f'  inner radius            = '
+        f'{statistics["inner_radius_nm"]:.6f} nm'
+    )
+
+    print(
+        f'  outer radius            = '
+        f'{statistics["outer_radius_nm"]:.6f} nm'
+    )
+
+    print(
+        f'  midpoint radius         = '
+        f'{statistics["midpoint_radius_nm"]:.6f} nm'
+    )
+
+    print(
+        f'  axial range             = '
+        f'{statistics["minimum_axial_nm"]:.6f} '
+        f'to '
+        f'{statistics["maximum_axial_nm"]:.6f} nm'
+    )
+
+    print(
+        f'  radial minimum          = '
+        f'{statistics["field_min_V_cm"]:+.6e} V/cm'
+    )
+
+    print(
+        f'  radial maximum          = '
+        f'{statistics["field_max_V_cm"]:+.6e} V/cm'
+    )
+
+    print(
+        f'  radial signed mean      = '
+        f'{statistics["field_mean_signed_V_cm"]:+.6e} V/cm'
+    )
+
+    print(
+        f'  radial absolute mean    = '
+        f'{statistics["field_mean_abs_V_cm"]:.6e} V/cm'
+    )
+
+    print(
+        f'  radial maximum absolute = '
+        f'{statistics["field_max_abs_V_cm"]:.6e} V/cm'
+    )
+
+
 def print_dielectric_field_statistics(
     device,
 ):
     """
-    Read and print radial dielectric-field statistics.
+    Read and print radial field statistics for all dielectrics.
     """
 
     results = (
