@@ -76,11 +76,11 @@ relative_permittivity_core_oxide = 3.9
 relative_permittivity_mos2 = 6.7
 # Initial out-of-plane MoS2 approximation
 
-relative_permittivity_al2o3 = 9.0
-# Baseline Al2O3 value
+relative_permittivity_al2o3 = 8.9
+# Literature nominal Al2O3 value
 
-relative_permittivity_hfo2 = 20.0
-# Baseline HfO2 value
+relative_permittivity_hfo2 = 19.65
+# Literature nominal HfO2 value
 
 relative_permittivity_air = 1.0
 

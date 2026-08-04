@@ -55,17 +55,18 @@ A_M2_TO_A_CM2 = 1.0e-4
 # Tunnel-oxide parameters
 # ============================================================
 
-BARRIER_HEIGHT_EV = 3.1
+BARRIER_HEIGHT_EV = 3.56
 # eV
 #
-# Initial placeholder/calibration parameter.
-# This should ultimately represent the effective electron
-# tunneling barrier at the MoS2 / Al2O3 interface.
+# Literature nominal reference value.
+# This is a CBO-based MoS2 / Al2O3 barrier candidate,
+# not a final I-V calibrated effective FN barrier.
 
-TUNNEL_EFFECTIVE_MASS_RATIO = 0.5
+TUNNEL_EFFECTIVE_MASS_RATIO = 0.28
 # m* / m0
 #
-# Initial placeholder/calibration parameter.
+# Literature nominal Al2O3 tunneling-mass reference.
+# It was not co-fitted with the MoS2 / Al2O3 CBO above.
 
 TUNNEL_OXIDE_THICKNESS_NM = 4.0
 # nm
