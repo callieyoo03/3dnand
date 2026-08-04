@@ -113,26 +113,95 @@ ACTIVE_AXIAL_MAXIMUM_NM = float(
 # Sweep settings
 # ============================================================
 
-GATE_VOLTAGES = (
-    0.0,
-    2.0,
-    4.0,
-    6.0,
+def parse_gate_voltages(
+    voltage_text,
+):
+    """
+    Parse a comma-separated list of nonnegative gate voltages.
+
+    Example
+    -------
+    "6,10,14,18,22,26,30"
+    """
+
+    gate_voltages = []
+
+    for token in voltage_text.split(","):
+        stripped_token = token.strip()
+
+        if not stripped_token:
+            continue
+
+        voltage = float(stripped_token)
+
+        if not math.isfinite(voltage):
+            raise ValueError(
+                "Gate voltages must be finite. "
+                f"Received: {voltage}"
+            )
+
+        if voltage < 0.0:
+            raise ValueError(
+                "Positive-field sweep requires nonnegative "
+                f"gate voltages. Received: {voltage}"
+            )
+
+        gate_voltages.append(voltage)
+
+    if not gate_voltages:
+        raise ValueError(
+            "At least one gate voltage must be provided."
+        )
+
+    for previous_voltage, current_voltage in zip(
+        gate_voltages,
+        gate_voltages[1:],
+    ):
+        if current_voltage <= previous_voltage:
+            raise ValueError(
+                "Gate voltages must be in strictly increasing order. "
+                f"Received: {tuple(gate_voltages)}"
+            )
+
+    return tuple(gate_voltages)
+
+
+GATE_VOLTAGES = parse_gate_voltages(
+    os.environ.get(
+        "GATE_VOLTAGES_V",
+        "0.0,2.0,4.0,6.0",
+    )
 )
 
 SOURCE_VOLTAGE = 0.0
-
 DRAIN_VOLTAGE = 0.05
 
-TRAPPED_ELECTRON_DENSITY = 0.0
+TRAPPED_ELECTRON_DENSITY = float(
+    os.environ.get(
+        "TRAPPED_ELECTRON_DENSITY_CM3",
+        "0.0",
+    )
+)
 # cm^-3
 
-GATE_INITIAL_STEP = 0.10
+if not math.isfinite(
+    TRAPPED_ELECTRON_DENSITY
+):
+    raise ValueError(
+        "TRAPPED_ELECTRON_DENSITY_CM3 "
+        "must be finite."
+    )
 
+if TRAPPED_ELECTRON_DENSITY < 0.0:
+    raise ValueError(
+        "TRAPPED_ELECTRON_DENSITY_CM3 "
+        "must not be negative."
+    )
+
+GATE_INITIAL_STEP = 0.10
 GATE_MINIMUM_STEP = 1.0e-3
 
 DRAIN_INITIAL_STEP = 0.01
-
 DRAIN_MINIMUM_STEP = 5.0e-4
 
 
@@ -140,8 +209,11 @@ DRAIN_MINIMUM_STEP = 5.0e-4
 # Output path
 # ============================================================
 
-OUTPUT_DIRECTORY = Path(
-    "results"
+SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+
+OUTPUT_DIRECTORY = (
+    SCRIPT_DIRECTORY
+    / "results"
 )
 
 default_output_filename = (
@@ -266,25 +338,12 @@ def validate_tunneling_result(
                 f'Missing tunneling result key: "{key}"'
             )
 
-    finite_keys = (
-        "electric_field_signed_V_cm",
-        "electric_field_abs_V_cm",
-        "fowler_nordheim_exponent",
-        "fowler_nordheim_current_density_A_cm2",
-        "signed_fowler_nordheim_current_density_A_cm2",
-        "direct_tunneling_current_density_A_cm2",
-        "trap_assisted_tunneling_current_density_A_cm2",
-        "total_tunneling_current_density_A_cm2",
-    )
-
-    for key in finite_keys:
+    for key in required_keys:
         value = float(
             tunneling_result[key]
         )
 
-        if not math.isfinite(
-            value
-        ):
+        if not math.isfinite(value):
             raise RuntimeError(
                 f'Non-finite tunneling value for "{key}".'
             )
@@ -449,14 +508,6 @@ def adaptive_voltage_ramp(
 def evaluate_interface_tunneling(
     tunnel_interface_statistics,
 ):
-    """
-    Calculate tunneling using the full-channel signed mean
-    interface field.
-
-    This preserves the earlier J(mean E) calculation so that it
-    can be compared with edge-resolved tunneling.
-    """
-
     interface_field_signed_V_cm = float(
         tunnel_interface_statistics[
             "field_mean_signed_V_cm"
@@ -499,19 +550,15 @@ def evaluate_interface_tunneling(
         "tunneling_result": (
             tunneling_result
         ),
-
         "program_time_s": (
             program_time_s
         ),
-
         "total_current_density_A_cm2": (
             total_current_density_A_cm2
         ),
-
         "injected_charge_density_C_cm2": (
             injected_charge_density_C_cm2
         ),
-
         "injected_electron_sheet_density_cm2": (
             injected_electron_sheet_density_cm2
         ),
@@ -525,23 +572,6 @@ def evaluate_interface_tunneling(
 def evaluate_edge_resolved_interface_tunneling(
     active_interface_statistics,
 ):
-    """
-    Calculate tunneling independently at every active interface
-    edge.
-
-    For each edge:
-
-        I_i = J(E_i) * A_i
-
-    Integrated current:
-
-        I_total = sum_i I_i
-
-    Area-averaged effective current density:
-
-        J_effective = I_total / A_total
-    """
-
     edge_data = (
         active_interface_statistics[
             "edge_data"
@@ -571,9 +601,7 @@ def evaluate_edge_resolved_interface_tunneling(
     total_tunneling_current_A = 0.0
 
     minimum_local_current_density_A_cm2 = None
-
     maximum_local_current_density_A_cm2 = 0.0
-
     maximum_local_field_abs_V_cm = 0.0
 
     edge_results = []
@@ -656,67 +684,55 @@ def evaluate_edge_resolved_interface_tunneling(
                         "edge_index"
                     ]
                 ),
-
                 "midpoint_axial_nm": (
                     edge[
                         "midpoint_axial_nm"
                     ]
                 ),
-
                 "axial_segment_lower_nm": (
                     edge[
                         "axial_segment_lower_nm"
                     ]
                 ),
-
                 "axial_segment_upper_nm": (
                     edge[
                         "axial_segment_upper_nm"
                     ]
                 ),
-
                 "axial_segment_length_nm": (
                     edge[
                         "axial_segment_length_nm"
                     ]
                 ),
-
                 "interface_radius_nm": (
                     edge[
                         "interface_radius_nm"
                     ]
                 ),
-
                 "interface_area_cm2": (
                     edge_area_cm2
                 ),
-
                 "electric_field_signed_V_cm": (
                     edge_field_signed_V_cm
                 ),
-
                 "electric_field_abs_V_cm": (
                     abs(
                         edge_field_signed_V_cm
                     )
                 ),
-
                 "fowler_nordheim_exponent": (
                     tunneling_result[
                         "fowler_nordheim_exponent"
                     ]
                 ),
-
                 "fowler_nordheim_current_density_A_cm2": (
                     tunneling_result[
                         "fowler_nordheim_current_density_A_cm2"
                     ]
                 ),
-
                 "total_tunneling_current_density_A_cm2": (
                     local_current_density_A_cm2
                 ),
-
                 "local_tunneling_current_A": (
                     local_tunneling_current_A
                 ),
@@ -752,63 +768,49 @@ def evaluate_edge_resolved_interface_tunneling(
         "edge_count": (
             len(edge_results)
         ),
-
         "edge_results": (
             edge_results
         ),
-
         "active_axial_minimum_nm": (
             active_interface_statistics[
                 "active_axial_minimum_nm"
             ]
         ),
-
         "active_axial_maximum_nm": (
             active_interface_statistics[
                 "active_axial_maximum_nm"
             ]
         ),
-
         "total_interface_area_cm2": (
             total_interface_area_cm2
         ),
-
         "total_tunneling_current_A": (
             total_tunneling_current_A
         ),
-
         "effective_current_density_A_cm2": (
             effective_current_density_A_cm2
         ),
-
         "minimum_local_current_density_A_cm2": (
             minimum_local_current_density_A_cm2
         ),
-
         "maximum_local_current_density_A_cm2": (
             maximum_local_current_density_A_cm2
         ),
-
         "maximum_local_field_abs_V_cm": (
             maximum_local_field_abs_V_cm
         ),
-
         "program_time_s": (
             program_time_s
         ),
-
         "total_injected_charge_C": (
             total_injected_charge_C
         ),
-
         "total_injected_electron_count": (
             total_injected_electron_count
         ),
-
         "area_averaged_injected_charge_density_C_cm2": (
             area_averaged_injected_charge_density_C_cm2
         ),
-
         "area_averaged_injected_electron_sheet_density_cm2": (
             area_averaged_injected_electron_sheet_density_cm2
         ),
@@ -903,13 +905,11 @@ def main():
 
     verify_device_structure()
 
-
     print_section(
         "STEP 2 : MATERIAL PARAMETERS"
     )
 
     set_material_parameters()
-
 
     print_section(
         "STEP 3 : DOPING"
@@ -917,20 +917,17 @@ def main():
 
     create_doping()
 
-
     print_section(
         "STEP 4 : SOLUTION VARIABLES"
     )
 
     create_solution_variables()
 
-
     print_section(
         "STEP 5 : EQUILIBRIUM CARRIER MODELS"
     )
 
     create_equilibrium_carrier_models()
-
 
     print_section(
         "STEP 6 : INITIALIZE ELECTRONS"
@@ -948,13 +945,11 @@ def main():
         "EquilibriumElectrons."
     )
 
-
     print_section(
         "STEP 7 : POISSON EQUATION"
     )
 
     create_poisson_model()
-
 
     print_section(
         "STEP 8 : STATIC TRAP FRAMEWORK"
@@ -962,13 +957,11 @@ def main():
 
     create_static_trap_framework()
 
-
     print_section(
         "STEP 9 : ELECTRON CURRENT MODEL"
     )
 
     create_electron_current_model()
-
 
     print_section(
         "STEP 10 : ELECTRON CONTINUITY EQUATION"
@@ -976,20 +969,17 @@ def main():
 
     create_continuity_equation()
 
-
     print_section(
         "STEP 11 : INTERFACE EQUATIONS"
     )
 
     create_interface_models()
 
-
     print_section(
         "STEP 12 : CONTACT EQUATIONS"
     )
 
     create_contact_models()
-
 
     print_section(
         "STEP 13 : EMPTY-TRAP ZERO-BIAS EQUILIBRIUM"
@@ -1022,7 +1012,6 @@ def main():
         "Empty-trap zero-bias equilibrium completed."
     )
 
-
     print_section(
         "STEP 14 : DRAIN READ-BIAS RAMP"
     )
@@ -1037,7 +1026,6 @@ def main():
             label="Drain ramp",
         )
     )
-
 
     print_section(
         "STEP 15 : POSITIVE GATE FIELD AND TUNNELING SWEEP"
@@ -1216,347 +1204,286 @@ def main():
                         "tunnel_oxide_thickness_nm"
                     ]
                 ),
-
                 "charge_trap_thickness_nm": (
                     geometry[
                         "charge_trap_thickness_nm"
                     ]
                 ),
-
                 "blocking_oxide_thickness_nm": (
                     geometry[
                         "blocking_oxide_thickness_nm"
                     ]
                 ),
-
                 "mos2_outer_radius_nm": (
                     geometry[
                         "mos2_outer_radius_nm"
                     ]
                 ),
-
                 "tunnel_oxide_outer_radius_nm": (
                     geometry[
                         "tunnel_oxide_outer_radius_nm"
                     ]
                 ),
-
                 "gate_outer_radius_nm": (
                     geometry[
                         "gate_outer_radius_nm"
                     ]
                 ),
-
                 "gate_voltage_V": (
                     current_gate_voltage
                 ),
-
                 "drain_voltage_V": (
                     current_drain_voltage
                 ),
-
                 "trap_density_cm3": (
                     TRAPPED_ELECTRON_DENSITY
                 ),
-
                 "drain_current_A": (
                     drain_current
                 ),
-
                 "region": (
                     region
                 ),
-
                 "edge_count": (
                     statistics[
                         "edge_count"
                     ]
                 ),
-
                 "total_edge_count": (
                     statistics[
                         "total_edge_count"
                     ]
                 ),
-
                 "radial_edge_count": (
                     statistics[
                         "radial_edge_count"
                     ]
                 ),
-
                 "axial_edge_count": (
                     statistics[
                         "axial_edge_count"
                     ]
                 ),
-
                 "diagonal_edge_count": (
                     statistics[
                         "diagonal_edge_count"
                     ]
                 ),
-
                 "degenerate_edge_count": (
                     statistics[
                         "degenerate_edge_count"
                     ]
                 ),
-
                 "field_min_V_cm": (
                     statistics[
                         "field_min_V_cm"
                     ]
                 ),
-
                 "field_max_V_cm": (
                     statistics[
                         "field_max_V_cm"
                     ]
                 ),
-
                 "field_mean_signed_V_cm": (
                     statistics[
                         "field_mean_signed_V_cm"
                     ]
                 ),
-
                 "field_mean_abs_V_cm": (
                     statistics[
                         "field_mean_abs_V_cm"
                     ]
                 ),
-
                 "field_max_abs_V_cm": (
                     statistics[
                         "field_max_abs_V_cm"
                     ]
                 ),
-
                 "tunnel_interface_edge_count": (
                     tunnel_interface_statistics[
                         "inner_interface_edge_count"
                     ]
                 ),
-
                 "tunnel_interface_inner_radius_nm": (
                     tunnel_interface_statistics[
                         "inner_radius_nm"
                     ]
                 ),
-
                 "tunnel_interface_outer_radius_nm": (
                     tunnel_interface_statistics[
                         "outer_radius_nm"
                     ]
                 ),
-
                 "tunnel_interface_midpoint_radius_nm": (
                     tunnel_interface_statistics[
                         "midpoint_radius_nm"
                     ]
                 ),
-
                 "tunnel_interface_minimum_axial_nm": (
                     tunnel_interface_statistics[
                         "minimum_axial_nm"
                     ]
                 ),
-
                 "tunnel_interface_maximum_axial_nm": (
                     tunnel_interface_statistics[
                         "maximum_axial_nm"
                     ]
                 ),
-
                 "tunnel_interface_field_min_V_cm": (
                     tunnel_interface_statistics[
                         "field_min_V_cm"
                     ]
                 ),
-
                 "tunnel_interface_field_max_V_cm": (
                     tunnel_interface_statistics[
                         "field_max_V_cm"
                     ]
                 ),
-
                 "tunnel_interface_field_mean_signed_V_cm": (
                     tunnel_interface_statistics[
                         "field_mean_signed_V_cm"
                     ]
                 ),
-
                 "tunnel_interface_field_mean_abs_V_cm": (
                     tunnel_interface_statistics[
                         "field_mean_abs_V_cm"
                     ]
                 ),
-
                 "tunnel_interface_field_max_abs_V_cm": (
                     tunnel_interface_statistics[
                         "field_max_abs_V_cm"
                     ]
                 ),
-
                 "active_axial_minimum_nm": (
                     edge_resolved_tunneling[
                         "active_axial_minimum_nm"
                     ]
                 ),
-
                 "active_axial_maximum_nm": (
                     edge_resolved_tunneling[
                         "active_axial_maximum_nm"
                     ]
                 ),
-
                 "active_interface_edge_count": (
                     edge_resolved_tunneling[
                         "edge_count"
                     ]
                 ),
-
                 "active_interface_area_cm2": (
                     edge_resolved_tunneling[
                         "total_interface_area_cm2"
                     ]
                 ),
-
                 "active_interface_field_mean_signed_V_cm": (
                     active_tunnel_interface_statistics[
                         "field_mean_signed_V_cm"
                     ]
                 ),
-
                 "active_interface_field_mean_abs_V_cm": (
                     active_tunnel_interface_statistics[
                         "field_mean_abs_V_cm"
                     ]
                 ),
-
                 "active_interface_field_area_weighted_signed_V_cm": (
                     active_tunnel_interface_statistics[
                         "area_weighted_field_mean_signed_V_cm"
                     ]
                 ),
-
                 "active_interface_field_area_weighted_abs_V_cm": (
                     active_tunnel_interface_statistics[
                         "area_weighted_field_mean_abs_V_cm"
                     ]
                 ),
-
                 "active_interface_field_max_abs_V_cm": (
                     active_tunnel_interface_statistics[
                         "field_max_abs_V_cm"
                     ]
                 ),
-
                 "tunneling_barrier_height_eV": (
                     tunnel_params.BARRIER_HEIGHT_EV
                 ),
-
                 "tunneling_effective_mass_ratio": (
                     tunnel_params.TUNNEL_EFFECTIVE_MASS_RATIO
                 ),
-
                 "program_time_s": (
                     program_time_s
                 ),
-
                 "fowler_nordheim_exponent": (
                     tunneling_result[
                         "fowler_nordheim_exponent"
                     ]
                 ),
-
                 "fowler_nordheim_current_density_A_cm2": (
                     tunneling_result[
                         "fowler_nordheim_current_density_A_cm2"
                     ]
                 ),
-
                 "signed_fowler_nordheim_current_density_A_cm2": (
                     tunneling_result[
                         "signed_fowler_nordheim_current_density_A_cm2"
                     ]
                 ),
-
                 "direct_tunneling_current_density_A_cm2": (
                     tunneling_result[
                         "direct_tunneling_current_density_A_cm2"
                     ]
                 ),
-
                 "trap_assisted_tunneling_current_density_A_cm2": (
                     tunneling_result[
                         "trap_assisted_tunneling_current_density_A_cm2"
                     ]
                 ),
-
                 "total_tunneling_current_density_A_cm2": (
                     tunneling_result[
                         "total_tunneling_current_density_A_cm2"
                     ]
                 ),
-
                 "injected_charge_density_C_cm2": (
                     injected_charge_density_C_cm2
                 ),
-
                 "injected_electron_sheet_density_cm2": (
                     injected_electron_sheet_density_cm2
                 ),
-
                 "edge_resolved_effective_current_density_A_cm2": (
                     edge_resolved_tunneling[
                         "effective_current_density_A_cm2"
                     ]
                 ),
-
                 "edge_resolved_total_tunneling_current_A": (
                     edge_resolved_tunneling[
                         "total_tunneling_current_A"
                     ]
                 ),
-
                 "edge_resolved_minimum_local_current_density_A_cm2": (
                     edge_resolved_tunneling[
                         "minimum_local_current_density_A_cm2"
                     ]
                 ),
-
                 "edge_resolved_maximum_local_current_density_A_cm2": (
                     edge_resolved_tunneling[
                         "maximum_local_current_density_A_cm2"
                     ]
                 ),
-
                 "edge_resolved_maximum_local_field_abs_V_cm": (
                     edge_resolved_tunneling[
                         "maximum_local_field_abs_V_cm"
                     ]
                 ),
-
                 "edge_resolved_total_injected_charge_C": (
                     edge_resolved_tunneling[
                         "total_injected_charge_C"
                     ]
                 ),
-
                 "edge_resolved_total_injected_electron_count": (
                     edge_resolved_tunneling[
                         "total_injected_electron_count"
                     ]
                 ),
-
                 "edge_resolved_average_injected_charge_density_C_cm2": (
                     edge_resolved_tunneling[
                         "area_averaged_injected_charge_density_C_cm2"
                     ]
                 ),
-
                 "edge_resolved_average_injected_electron_sheet_density_cm2": (
                     edge_resolved_tunneling[
                         "area_averaged_injected_electron_sheet_density_cm2"
@@ -1567,7 +1494,6 @@ def main():
             results.append(
                 result_row
             )
-
 
     print_section(
         "STEP 16 : SAVE FIELD AND TUNNELING RESULTS"
@@ -1658,7 +1584,6 @@ def main():
         f'Field and tunneling results written to '
         f'"{OUTPUT_CSV}".'
     )
-
 
     print_section(
         "POSITIVE FIELD AND TUNNELING SWEEP SUCCESSFUL"
