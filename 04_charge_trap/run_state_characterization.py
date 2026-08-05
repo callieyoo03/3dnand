@@ -15,7 +15,10 @@ program/erase dynamics, tunneling, retention, or endurance.
 from __future__ import annotations
 
 import argparse
+import csv
+import hashlib
 import math
+import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -34,6 +37,408 @@ from state_sweep_helpers import (
     initialize_characterization_device,
     write_standard_csv,
 )
+
+
+LEGACY_CONDITION = "4/5/8 nm; Al2O3/HfO2 relative permittivity 9.0/20.0"
+FINAL_CONDITION = "3/5/16 nm; Al2O3/HfO2 relative permittivity 8.9/19.65"
+IOFF_WARNING = (
+    "Ioff and ON/OFF are numerical-leakage-floor sensitive; prioritize Vth, "
+    "delta-Vth, and complete IV curves for fitting."
+)
+
+
+def sha256_file(path: Path) -> str:
+    """Return the lowercase SHA-256 digest of *path* without loading it all."""
+
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as input_file:
+        for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_csv_rows(path: Path) -> list[dict[str, str]]:
+    """Read a UTF-8 CSV into ordered dictionaries."""
+
+    with Path(path).open(newline="", encoding="utf-8") as csv_file:
+        return list(csv.DictReader(csv_file))
+
+
+def recover_legacy_metrics_from_comparison(
+    path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Recover verified legacy metric inputs from the tracked comparison CSV.
+
+    A final-data checkout no longer contains the four legacy raw CSVs, and the
+    ignored local snapshot is deliberately absent in a clean clone.  The
+    published comparison CSV therefore acts as the durable legacy-metric
+    record.  Its complete schema, coordinate grid, labels, provenance strings,
+    finite numeric values, and signed Vth differences are validated before any
+    legacy values are accepted.
+    """
+
+    comparison_path = (
+        config.BASELINE_COMPARISON_CSV_PATH if path is None else Path(path)
+    )
+    try:
+        with comparison_path.open(newline="", encoding="utf-8") as csv_file:
+            reader = csv.DictReader(csv_file)
+            actual_fieldnames = tuple(reader.fieldnames or ())
+            if actual_fieldnames != config.BASELINE_COMPARISON_FIELDNAMES:
+                raise RuntimeError(
+                    "Legacy baseline comparison schema mismatch: "
+                    f"{actual_fieldnames}"
+                )
+            comparison_rows = list(reader)
+    except OSError as error:
+        raise RuntimeError(
+            "Verified legacy raw data is unavailable and the tracked baseline "
+            f"comparison cannot be read: {comparison_path}"
+        ) from error
+
+    expected_state_names = {
+        int(state["state_index"]): str(state["state"])
+        for state in config.MEMORY_STATES
+    }
+    expected_coordinates = {
+        (state_index, round(float(vds_V), 12))
+        for state_index in expected_state_names
+        for vds_V in config.IDVG_VDS_VALUES_V
+    }
+    numeric_fields = (
+        "legacy_Vth_V",
+        "final_Vth_V",
+        "Vth_difference_V",
+        "legacy_SS_mV_dec",
+        "final_SS_mV_dec",
+        "legacy_Ion_A",
+        "final_Ion_A",
+        "legacy_Ioff_A",
+        "final_Ioff_A",
+        "legacy_on_off_ratio",
+        "final_on_off_ratio",
+        "legacy_gm_max_S",
+        "final_gm_max_S",
+    )
+
+    recovered_by_key: dict[tuple[int, float], dict[str, Any]] = {}
+    for row_number, row in enumerate(comparison_rows, start=2):
+        if None in row:
+            raise RuntimeError(
+                "Legacy baseline comparison has extra columns at CSV row "
+                f"{row_number}."
+            )
+        try:
+            state_index = int(row["state_index"])
+            vds_V = float(row["VDS_V"])
+            numeric_values = {
+                name: float(row[name]) for name in numeric_fields
+            }
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(
+                "Legacy baseline comparison has an invalid value at CSV row "
+                f"{row_number}."
+            ) from error
+
+        if not math.isfinite(vds_V) or not all(
+            math.isfinite(value) for value in numeric_values.values()
+        ):
+            raise RuntimeError(
+                "Legacy baseline comparison has a non-finite value at CSV "
+                f"row {row_number}."
+            )
+
+        coordinate = (state_index, round(vds_V, 12))
+        if coordinate not in expected_coordinates:
+            raise RuntimeError(
+                "Legacy baseline comparison has an unexpected coordinate at "
+                f"CSV row {row_number}: {coordinate}"
+            )
+        if coordinate in recovered_by_key:
+            raise RuntimeError(
+                "Legacy baseline comparison has a duplicate coordinate: "
+                f"{coordinate}"
+            )
+        if row["state"] != expected_state_names[state_index]:
+            raise RuntimeError(
+                "Legacy baseline comparison state label mismatch at CSV row "
+                f"{row_number}."
+            )
+        if row["legacy_condition"] != LEGACY_CONDITION:
+            raise RuntimeError(
+                "Legacy baseline comparison provenance mismatch at CSV row "
+                f"{row_number}."
+            )
+        if row["final_condition"] != FINAL_CONDITION:
+            raise RuntimeError(
+                "Final baseline comparison provenance mismatch at CSV row "
+                f"{row_number}."
+            )
+        if row["ioff_on_off_warning"] != IOFF_WARNING:
+            raise RuntimeError(
+                "Legacy baseline comparison warning mismatch at CSV row "
+                f"{row_number}."
+            )
+
+        expected_difference = (
+            numeric_values["final_Vth_V"]
+            - numeric_values["legacy_Vth_V"]
+        )
+        if not math.isclose(
+            numeric_values["Vth_difference_V"],
+            expected_difference,
+            rel_tol=1.0e-12,
+            abs_tol=1.0e-12,
+        ):
+            raise RuntimeError(
+                "Legacy baseline comparison Vth difference mismatch at CSV "
+                f"row {row_number}."
+            )
+
+        recovered_by_key[coordinate] = {
+            "state_index": state_index,
+            "state": row["state"],
+            "VDS_V": vds_V,
+            "Vth_V": numeric_values["legacy_Vth_V"],
+            "SS_mV_dec": numeric_values["legacy_SS_mV_dec"],
+            "Ion_A": numeric_values["legacy_Ion_A"],
+            "Ioff_A": numeric_values["legacy_Ioff_A"],
+            "on_off_ratio": numeric_values["legacy_on_off_ratio"],
+            "gm_max_S": numeric_values["legacy_gm_max_S"],
+        }
+
+    actual_coordinates = set(recovered_by_key)
+    if actual_coordinates != expected_coordinates:
+        missing_coordinates = sorted(expected_coordinates - actual_coordinates)
+        raise RuntimeError(
+            "Legacy baseline comparison coordinate grid is incomplete; "
+            f"missing={missing_coordinates}"
+        )
+
+    return [recovered_by_key[key] for key in sorted(recovered_by_key)]
+
+
+def preserve_legacy_shared_data() -> list[dict[str, Any]]:
+    """Preserve or recover the verified 0d7d917 legacy metric bundle.
+
+    The ignored candidate directory is intentionally used for this snapshot so
+    the legacy raw curves are not promoted as a second public interface.  A
+    partial or hash-mismatched snapshot is rejected instead of silently being
+    replaced with whatever happens to be in ``shared_data``.  In a clean
+    checkout containing final shared data, legacy metrics are instead recovered
+    from the fully validated tracked baseline-comparison CSV.
+    """
+
+    source_paths = {
+        path.name: path
+        for path in (
+            config.IDVG_BY_STATE_CSV_PATH,
+            config.IDVD_BY_STATE_CSV_PATH,
+            config.METRICS_BY_STATE_CSV_PATH,
+            config.MEMORY_STATE_MAP_CSV_PATH,
+        )
+    }
+    snapshot_paths = {
+        name: config.LEGACY_SNAPSHOT_DIRECTORY / name
+        for name in source_paths
+    }
+    existing_snapshots = {
+        name for name, path in snapshot_paths.items() if path.exists()
+    }
+
+    if existing_snapshots and existing_snapshots != set(snapshot_paths):
+        raise RuntimeError(
+            "Legacy snapshot is incomplete; refusing to mix data bundles: "
+            f"{sorted(existing_snapshots)}"
+        )
+
+    if existing_snapshots:
+        for name, snapshot_path in snapshot_paths.items():
+            expected_digest = config.LEGACY_SHARED_DATA_SHA256[name]
+            actual_digest = sha256_file(snapshot_path)
+            if actual_digest != expected_digest:
+                raise RuntimeError(
+                    f"Legacy snapshot hash mismatch for {name}: "
+                    f"{actual_digest} != {expected_digest}"
+                )
+        return read_csv_rows(snapshot_paths["metrics_by_state.csv"])
+
+    current_digests = {
+        name: sha256_file(source_path) if source_path.exists() else None
+        for name, source_path in source_paths.items()
+    }
+    matching_legacy_files = {
+        name
+        for name, actual_digest in current_digests.items()
+        if actual_digest == config.LEGACY_SHARED_DATA_SHA256[name]
+    }
+
+    if matching_legacy_files == set(source_paths):
+        config.LEGACY_SNAPSHOT_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        for name, source_path in source_paths.items():
+            shutil.copyfile(source_path, snapshot_paths[name])
+        for name, snapshot_path in snapshot_paths.items():
+            expected_digest = config.LEGACY_SHARED_DATA_SHA256[name]
+            actual_digest = sha256_file(snapshot_path)
+            if actual_digest != expected_digest:
+                raise RuntimeError(
+                    f"Legacy snapshot hash mismatch for {name}: "
+                    f"{actual_digest} != {expected_digest}"
+                )
+        return read_csv_rows(snapshot_paths["metrics_by_state.csv"])
+
+    if matching_legacy_files:
+        raise RuntimeError(
+            "Canonical shared data is a mixed legacy/final bundle; refusing "
+            "baseline recovery. Legacy-hash matches: "
+            f"{sorted(matching_legacy_files)}"
+        )
+
+    return recover_legacy_metrics_from_comparison()
+
+
+def build_baseline_comparison_rows(
+    legacy_metrics_rows: Sequence[Mapping[str, Any]],
+    final_metrics_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Compare final metrics with the verified legacy geometry/material run."""
+
+    legacy_by_key = {
+        (int(row["state_index"]), round(float(row["VDS_V"]), 12)): row
+        for row in legacy_metrics_rows
+    }
+    final_by_key = {
+        (int(row["state_index"]), round(float(row["VDS_V"]), 12)): row
+        for row in final_metrics_rows
+    }
+    if set(legacy_by_key) != set(final_by_key):
+        raise RuntimeError(
+            "Legacy/final metric coordinates differ; comparison would be "
+            "incomplete."
+        )
+
+    comparison_rows: list[dict[str, Any]] = []
+    for key in sorted(final_by_key):
+        legacy = legacy_by_key[key]
+        final = final_by_key[key]
+        legacy_vth = float(legacy["Vth_V"])
+        final_vth = float(final["Vth_V"])
+        comparison_rows.append(
+            {
+                "state_index": int(final["state_index"]),
+                "state": str(final["state"]),
+                "VDS_V": float(final["VDS_V"]),
+                "legacy_Vth_V": legacy_vth,
+                "final_Vth_V": final_vth,
+                "Vth_difference_V": final_vth - legacy_vth,
+                "legacy_SS_mV_dec": float(legacy["SS_mV_dec"]),
+                "final_SS_mV_dec": float(final["SS_mV_dec"]),
+                "legacy_Ion_A": float(legacy["Ion_A"]),
+                "final_Ion_A": float(final["Ion_A"]),
+                "legacy_Ioff_A": float(legacy["Ioff_A"]),
+                "final_Ioff_A": float(final["Ioff_A"]),
+                "legacy_on_off_ratio": float(legacy["on_off_ratio"]),
+                "final_on_off_ratio": float(final["on_off_ratio"]),
+                "legacy_gm_max_S": float(legacy["gm_max_S"]),
+                "final_gm_max_S": float(final["gm_max_S"]),
+                "legacy_condition": LEGACY_CONDITION,
+                "final_condition": FINAL_CONDITION,
+                "ioff_on_off_warning": IOFF_WARNING,
+            }
+        )
+    return comparison_rows
+
+
+def validate_bias_grid(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    expected_coordinates: set[tuple[int, float, float]],
+) -> dict[str, Any]:
+    """Check exact coordinate coverage, duplicates, errors, and finiteness."""
+
+    coordinates = [
+        (
+            int(row["state_index"]),
+            round(float(row["VGS_V"]), 12),
+            round(float(row["VDS_V"]), 12),
+        )
+        for row in rows
+    ]
+    coordinate_set = set(coordinates)
+    duplicate_count = len(coordinates) - len(coordinate_set)
+    missing_coordinates = expected_coordinates - coordinate_set
+    unexpected_coordinates = coordinate_set - expected_coordinates
+    nonempty_errors = [
+        str(row.get("error_message", ""))
+        for row in rows
+        if str(row.get("error_message", "")).strip()
+    ]
+    return {
+        "duplicate_count": duplicate_count,
+        "missing_count": len(missing_coordinates),
+        "unexpected_count": len(unexpected_coordinates),
+        "nonempty_error_count": len(nonempty_errors),
+        "valid": (
+            duplicate_count == 0
+            and not missing_coordinates
+            and not unexpected_coordinates
+            and not nonempty_errors
+        ),
+    }
+
+
+def inclusive_voltage_values(
+    start_V: float,
+    stop_V: float,
+    step_V: float,
+) -> tuple[float, ...]:
+    """Return an endpoint-aligned deterministic voltage tuple."""
+
+    interval_count = int(round((float(stop_V) - float(start_V)) / step_V))
+    return tuple(
+        round(float(start_V) + index * float(step_V), 12)
+        for index in range(interval_count + 1)
+    )
+
+
+def expected_idvg_coordinates(
+    states: Sequence[Mapping[str, Any]],
+    vds_values_V: Sequence[float],
+    step_V: float,
+) -> set[tuple[int, float, float]]:
+    """Build the exact expected state/VGS/VDS ID-VG coordinate set."""
+
+    vgs_values = inclusive_voltage_values(
+        config.IDVG_VGS_START_V,
+        config.IDVG_VGS_STOP_V,
+        step_V,
+    )
+    return {
+        (int(state["state_index"]), vgs_V, round(float(vds_V), 12))
+        for state in states
+        for vds_V in vds_values_V
+        for vgs_V in vgs_values
+    }
+
+
+def expected_idvd_coordinates(
+    states: Sequence[Mapping[str, Any]],
+    vgs_values_V: Sequence[float],
+    step_V: float,
+) -> set[tuple[int, float, float]]:
+    """Build the exact expected state/VGS/VDS ID-VD coordinate set."""
+
+    vds_values = inclusive_voltage_values(
+        config.IDVD_VDS_START_V,
+        config.IDVD_VDS_STOP_V,
+        step_V,
+    )
+    return {
+        (int(state["state_index"]), round(float(vgs_V), 12), vds_V)
+        for state in states
+        for vgs_V in vgs_values_V
+        for vds_V in vds_values
+    }
 
 
 def build_metrics_rows(
@@ -488,6 +893,17 @@ def print_summary(
     print("Sanity checks:")
     print(f"  finite converged currents: {sanity['finite_current_ok']}")
     print(f"  orchestration/reset health: {sanity['orchestration_ok']}")
+    for analysis_name in ("idvg", "idvd"):
+        grid = sanity.get(f"{analysis_name}_grid")
+        if grid is not None:
+            print(
+                f"  {analysis_name.upper()} complete unique grid: "
+                f"{grid['valid']} "
+                f"(duplicates={grid['duplicate_count']}, "
+                f"missing={grid['missing_count']}, "
+                f"unexpected={grid['unexpected_count']}, "
+                f"errors={grid['nonempty_error_count']})"
+            )
     if metrics_rows:
         print(f"  complete finite metrics: {sanity['metrics_complete_ok']}")
     if sanity["vth_order_ok"] is not None:
@@ -506,6 +922,11 @@ def print_summary(
             "  programmed curve generally right-shifted: "
             f"{sanity['right_shift_ok']} "
             f"(fraction={_format_metric(sanity['right_shift_fraction'])})"
+        )
+    if sanity.get("candidate_shared_hash_match") is not None:
+        print(
+            "  candidate/shared SHA-256 match: "
+            f"{sanity['candidate_shared_hash_match']}"
         )
 
     for error_message in sanity["orchestration_errors"]:
@@ -554,6 +975,12 @@ def main() -> int:
     mode = _selected_mode(arguments)
     config.validate_state_characterization_config()
 
+    legacy_metrics_rows: list[dict[str, Any]] = []
+    if mode == "all":
+        # Protect a verified raw legacy bundle when present, or recover its
+        # metrics from the tracked comparison in a clean final-data checkout.
+        legacy_metrics_rows = preserve_legacy_shared_data()
+
     smoke = mode == "smoke"
     run_idvg = mode in {"smoke", "idvg-only", "all"}
     run_idvd = mode in {"smoke", "idvd-only", "all"}
@@ -566,6 +993,10 @@ def main() -> int:
     metrics_rows: list[dict[str, Any]] = []
     memory_map_rows: list[dict[str, Any]] = []
     generated_paths: list[Path] = []
+    raw_idvg_path: Path | None = None
+    raw_idvd_path: Path | None = None
+    raw_metrics_path: Path | None = None
+    raw_map_path: Path | None = None
 
     if run_idvg:
         idvg_vds_values = (
@@ -659,6 +1090,26 @@ def main() -> int:
         orchestration_errors=operating_point.orchestration_errors,
     )
 
+    if run_idvg:
+        sanity["idvg_grid"] = validate_bias_grid(
+            idvg_rows,
+            expected_coordinates=expected_idvg_coordinates(
+                states,
+                idvg_vds_values,
+                idvg_step_V,
+            ),
+        )
+    if run_idvd:
+        sanity["idvd_grid"] = validate_bias_grid(
+            idvd_rows,
+            expected_coordinates=expected_idvd_coordinates(
+                states,
+                idvd_vgs_values,
+                idvd_step_V,
+            ),
+        )
+    sanity["candidate_shared_hash_match"] = None
+
     checks = [
         sanity["failed_bias_points"] == 0,
         bool(sanity["finite_current_ok"]),
@@ -667,45 +1118,79 @@ def main() -> int:
     if run_idvg:
         checks.extend(
             (
+                bool(sanity["idvg_grid"]["valid"]),
                 bool(sanity["metrics_complete_ok"]),
                 bool(sanity["vth_order_ok"]),
                 bool(sanity["vth_monotonic_ok"]),
                 bool(sanity["right_shift_ok"]),
             )
         )
+    if run_idvd:
+        checks.append(bool(sanity["idvd_grid"]["valid"]))
 
     run_valid = all(checks)
 
-    # Only a complete, validated --all run publishes the four canonical CSVs
-    # as one coherent dataset.  Smoke and partial modes remain in results/ so
-    # they cannot clobber or mix a previously validated shared_data bundle.
+    # Only a complete, validated --all run publishes the canonical bundle.
+    # Every public file is copied byte-for-byte from a candidate written first,
+    # making candidate/shared SHA verification meaningful and preventing a
+    # failed solve from clobbering the committed legacy data.
     if mode == "all" and run_valid:
-        write_standard_csv(
-            config.IDVG_BY_STATE_CSV_PATH,
-            config.IDVG_FIELDNAMES,
-            idvg_rows,
-        )
-        write_standard_csv(
-            config.IDVD_BY_STATE_CSV_PATH,
-            config.IDVD_FIELDNAMES,
-            idvd_rows,
-        )
-        write_standard_csv(
-            config.METRICS_BY_STATE_CSV_PATH,
-            config.METRICS_FIELDNAMES,
+        if any(
+            path is None
+            for path in (
+                raw_idvg_path,
+                raw_idvd_path,
+                raw_metrics_path,
+                raw_map_path,
+            )
+        ):
+            raise RuntimeError("Complete candidate bundle was not generated.")
+
+        comparison_rows = build_baseline_comparison_rows(
+            legacy_metrics_rows,
             metrics_rows,
         )
-        write_standard_csv(
-            config.MEMORY_STATE_MAP_CSV_PATH,
-            config.MEMORY_STATE_MAP_FIELDNAMES,
-            memory_map_rows,
+        candidate_comparison_path = (
+            config.STATE_CHARACTERIZATION_RESULTS_DIRECTORY
+            / "baseline_comparison_legacy_vs_final.csv"
         )
+        write_standard_csv(
+            candidate_comparison_path,
+            config.BASELINE_COMPARISON_FIELDNAMES,
+            comparison_rows,
+        )
+
+        candidate_to_shared = (
+            (raw_idvg_path, config.IDVG_BY_STATE_CSV_PATH),
+            (raw_idvd_path, config.IDVD_BY_STATE_CSV_PATH),
+            (raw_metrics_path, config.METRICS_BY_STATE_CSV_PATH),
+            (raw_map_path, config.MEMORY_STATE_MAP_CSV_PATH),
+            (
+                candidate_comparison_path,
+                config.BASELINE_COMPARISON_CSV_PATH,
+            ),
+        )
+        for candidate_path, shared_path in candidate_to_shared:
+            if candidate_path is None:
+                raise RuntimeError("Unexpected missing candidate path.")
+            shared_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(candidate_path, shared_path)
+
+        hash_match = all(
+            sha256_file(candidate_path) == sha256_file(shared_path)
+            for candidate_path, shared_path in candidate_to_shared
+            if candidate_path is not None
+        )
+        sanity["candidate_shared_hash_match"] = hash_match
+        run_valid = run_valid and hash_match
         generated_paths.extend(
             (
+                candidate_comparison_path,
                 config.IDVG_BY_STATE_CSV_PATH,
                 config.IDVD_BY_STATE_CSV_PATH,
                 config.METRICS_BY_STATE_CSV_PATH,
                 config.MEMORY_STATE_MAP_CSV_PATH,
+                config.BASELINE_COMPARISON_CSV_PATH,
             )
         )
 

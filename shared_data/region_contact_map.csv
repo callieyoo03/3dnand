@@ -1,0 +1,15 @@
+entity_type,name,material_or_region,adjacent_region,location,boundary_condition,notes
+region,CoreOxide,Oxide,MoS2,r=0..10 nm; z=0..100 nm,bulk model,Poisson dielectric
+region,MoS2,MoS2,CoreOxide;TunnelOxide,r=10..12 nm; z=0..100 nm,bulk model,Poisson plus electron continuity
+region,TunnelOxide,Oxide,MoS2;ChargeTrap,r=12..15 nm; z=0..100 nm,bulk model,Poisson dielectric
+region,ChargeTrap,ChargeTrap,TunnelOxide;BlockingOxide,r=15..20 nm; z=0..100 nm,bulk model,Poisson dielectric with prescribed trapped charge
+region,BlockingOxide,Oxide,ChargeTrap;GateMetal,r=20..36 nm; z=0..100 nm,bulk model,Poisson dielectric; gate contact at outer boundary
+region,GateMetal,Metal,BlockingOxide;Air,r=36..38 nm; z=0..100 nm,none,Mesh-only region; no bulk equation
+region,Air,Air,GateMetal,r=38..40 nm; z=0..100 nm,none,Mesh-only region; no bulk equation
+interface,CoreOxide_MoS2,CoreOxide,MoS2,r=10 nm; z=0..100 nm,Potential continuity and flux conservation,Electrostatic interface
+interface,MoS2_TunnelOxide,MoS2,TunnelOxide,r=12 nm; z=0..100 nm,Potential continuity and flux conservation,Electrostatic interface
+interface,TunnelOxide_ChargeTrap,TunnelOxide,ChargeTrap,r=15 nm; z=0..100 nm,Potential continuity and flux conservation,Electrostatic interface
+interface,ChargeTrap_BlockingOxide,ChargeTrap,BlockingOxide,r=20 nm; z=0..100 nm,Potential continuity and flux conservation,Electrostatic interface
+contact,source,Metal,MoS2,z=0 nm; r=10..12 nm,Ideal electron-only ohmic contact; source_bias,Potential and electron continuity contact equations
+contact,drain,Metal,MoS2,z=100 nm; r=10..12 nm,Ideal electron-only ohmic contact; drain_bias,Potential and electron continuity contact equations
+contact,gate,Metal,BlockingOxide,r=36 nm; z=0..100 nm,Ideal electrostatic gate; gate_bias,Contact lies on BlockingOxide; GateMetal bulk is mesh-only

@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<VTKFile type="vtkMultiBlockDataSet" version="0.1" byte_order="LittleEndian" compressor="vtkZLibDataCompressor">
+  <vtkMultiBlockDataSet>
+    <DataSet group="0" dataset="0" file="mos2_gaa_empty_on_reference_0.vtu" name="Air" />
+    <DataSet group="1" dataset="0" file="mos2_gaa_empty_on_reference_1.vtu" name="BlockingOxide" />
+    <DataSet group="2" dataset="0" file="mos2_gaa_empty_on_reference_2.vtu" name="ChargeTrap" />
+    <DataSet group="3" dataset="0" file="mos2_gaa_empty_on_reference_3.vtu" name="CoreOxide" />
+    <DataSet group="4" dataset="0" file="mos2_gaa_empty_on_reference_4.vtu" name="GateMetal" />
+    <DataSet group="5" dataset="0" file="mos2_gaa_empty_on_reference_5.vtu" name="MoS2" />
+    <DataSet group="6" dataset="0" file="mos2_gaa_empty_on_reference_6.vtu" name="TunnelOxide" />
+  </vtkMultiBlockDataSet>
+</VTKFile>

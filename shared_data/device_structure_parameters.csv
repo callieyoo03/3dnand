@@ -1,0 +1,13 @@
+parameter,value,unit,description,source_file,runtime_verified,derived
+device_type,MoS2 cylindrical GAA charge-trap memory,,Cylindrical GAA charge-trap memory device,compact_handoff_parameters.py,true,false
+coordinate_system,"2D axisymmetric cylindrical (x=r, y=z)",,"DEVSIM x=r, y=z two-dimensional axisymmetric coordinates",compact_handoff_parameters.py,true,false
+gate_length_nm,100.0,nm,Gate length along the active channel,compact_handoff_parameters.py,true,false
+core_radius_nm,10.0,nm,Inner core-oxide radius,compact_handoff_parameters.py,true,false
+channel_inner_radius_nm,10.0,nm,MoS2 inner radius,compact_handoff_parameters.py,true,true
+channel_outer_radius_nm,12.0,nm,MoS2 outer radius,compact_handoff_parameters.py,true,true
+channel_thickness_nm,2.0,nm,MoS2 channel thickness,compact_handoff_parameters.py,true,false
+tunnel_oxide_thickness_nm,3.0,nm,Al2O3 tunnel dielectric thickness,compact_handoff_parameters.py,true,false
+charge_trap_thickness_nm,5.0,nm,HfO2 charge-trap-layer thickness,compact_handoff_parameters.py,true,false
+blocking_oxide_thickness_nm,16.0,nm,Al2O3 blocking dielectric thickness,compact_handoff_parameters.py,true,false
+gate_inner_radius_nm,36.0,nm,Gate-contact inner radius at the blocking-oxide boundary,compact_handoff_parameters.py,true,true
+active_axial_length_nm,100.0,nm,Active source-to-drain axial length,compact_handoff_parameters.py,true,false

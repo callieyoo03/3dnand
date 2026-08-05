@@ -45,13 +45,31 @@ import sys
 from pathlib import Path
 
 
+PROJECT_ROOT_DIRECTORY = Path(__file__).resolve().parent.parent
+PROJECT_ROOT_TEXT = str(PROJECT_ROOT_DIRECTORY)
+
+if PROJECT_ROOT_TEXT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_TEXT)
+
+import compact_handoff_parameters as compact_parameters
+
+if Path(compact_parameters.__file__).resolve() != (
+    PROJECT_ROOT_DIRECTORY / "compact_handoff_parameters.py"
+).resolve():
+    raise ImportError("compact_handoff_parameters resolved outside this repository.")
+
+
 # ============================================================
 # Fixed device conditions
 # ============================================================
 
-TUNNEL_OXIDE_THICKNESS_NM = 3.0
+TUNNEL_OXIDE_THICKNESS_NM = (
+    compact_parameters.TUNNEL_OXIDE_THICKNESS_NM
+)
 
-BLOCKING_OXIDE_THICKNESS_NM = 16.0
+BLOCKING_OXIDE_THICKNESS_NM = (
+    compact_parameters.BLOCKING_OXIDE_THICKNESS_NM
+)
 
 PROGRAM_GATE_VOLTAGE_V = 16.0
 
@@ -63,7 +81,7 @@ DRAIN_VOLTAGE_V = 0.05
 # ============================================================
 
 CHARGE_TRAP_THICKNESSES_NM = (
-    5.0,
+    compact_parameters.CHARGE_TRAP_THICKNESS_NM,
 )
 
 

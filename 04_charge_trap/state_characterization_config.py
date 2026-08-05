@@ -30,13 +30,40 @@ MODULE_DIRECTORY = Path(__file__).resolve().parent
 REPOSITORY_ROOT = MODULE_DIRECTORY.parent
 SHARED_DATA_DIRECTORY = REPOSITORY_ROOT / "shared_data"
 STATE_CHARACTERIZATION_RESULTS_DIRECTORY = (
-    MODULE_DIRECTORY / "results" / "state_characterization"
+    MODULE_DIRECTORY
+    / "results"
+    / "state_characterization_final_3_5_16nm"
+)
+
+LEGACY_SNAPSHOT_DIRECTORY = (
+    STATE_CHARACTERIZATION_RESULTS_DIRECTORY / "legacy_4_5_8nm_k9_20"
 )
 
 IDVG_BY_STATE_CSV_PATH = SHARED_DATA_DIRECTORY / "idvg_by_state.csv"
 IDVD_BY_STATE_CSV_PATH = SHARED_DATA_DIRECTORY / "idvd_by_state.csv"
 METRICS_BY_STATE_CSV_PATH = SHARED_DATA_DIRECTORY / "metrics_by_state.csv"
 MEMORY_STATE_MAP_CSV_PATH = SHARED_DATA_DIRECTORY / "memory_state_map.csv"
+BASELINE_COMPARISON_CSV_PATH = (
+    SHARED_DATA_DIRECTORY / "baseline_comparison_legacy_vs_final.csv"
+)
+
+# These hashes identify the verified legacy bundle committed at 0d7d917.  They
+# are used only to protect the old data before a validated candidate replaces
+# the four canonical files; they are not fitting or physics parameters.
+LEGACY_SHARED_DATA_SHA256 = {
+    "idvg_by_state.csv": (
+        "c5ba12034c4cde9f6835f94712527367d6972c2e8b641f5a8740bdd8b06fc808"
+    ),
+    "idvd_by_state.csv": (
+        "107e3c115c1f2ec818b8f0afdfb1dab80a3b6e8ec454766402ada649c80603f5"
+    ),
+    "metrics_by_state.csv": (
+        "9d7aaa4097703f832fd97aaf92abd848768d105e9631ca6d19aa300d01ebca22"
+    ),
+    "memory_state_map.csv": (
+        "fc0ef0f30d5f3a490ef858346a8070632e4c96061e5b95f6eb3ea169ce2224a2"
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -120,11 +147,8 @@ IOFF_VDS_V = float(trap_parameters.DRAIN_VOLTAGE)
 
 CURRENT_FLOOR_A = 1.0e-30
 
-# The initial 1.0e-13 A lower bound from the task specification yielded only
-# zero or one sample in the first empty/programmed smoke curves because the
-# simulated transition spans several decades per 0.25 V output interval.  A
-# documented 1.0e-18 A lower bound gives the full 0.1 V sweep enough points for
-# the required regression while remaining well above the 1.0e-30 numeric floor.
+# The final handoff contract fixes the regression window at 1.0e-18 A through
+# 1.0e-10 A.  The lower limit remains well above the 1.0e-30 numeric floor.
 SS_CURRENT_MIN_A = 1.0e-18
 SS_CURRENT_MAX_A = 1.0e-10
 SS_MINIMUM_POINT_COUNT = 4
@@ -217,6 +241,28 @@ MEMORY_STATE_MAP_FIELDNAMES = (
     "VDS_V",
     "Vth_V",
     "delta_Vth_from_empty_V",
+)
+
+BASELINE_COMPARISON_FIELDNAMES = (
+    "state_index",
+    "state",
+    "VDS_V",
+    "legacy_Vth_V",
+    "final_Vth_V",
+    "Vth_difference_V",
+    "legacy_SS_mV_dec",
+    "final_SS_mV_dec",
+    "legacy_Ion_A",
+    "final_Ion_A",
+    "legacy_Ioff_A",
+    "final_Ioff_A",
+    "legacy_on_off_ratio",
+    "final_on_off_ratio",
+    "legacy_gm_max_S",
+    "final_gm_max_S",
+    "legacy_condition",
+    "final_condition",
+    "ioff_on_off_warning",
 )
 
 
@@ -496,6 +542,9 @@ def validate_state_characterization_config() -> None:
         IDVD_BY_STATE_CSV_PATH: "idvd_by_state.csv",
         METRICS_BY_STATE_CSV_PATH: "metrics_by_state.csv",
         MEMORY_STATE_MAP_CSV_PATH: "memory_state_map.csv",
+        BASELINE_COMPARISON_CSV_PATH: (
+            "baseline_comparison_legacy_vs_final.csv"
+        ),
     }
     for csv_path, expected_name in expected_paths.items():
         if csv_path.parent != SHARED_DATA_DIRECTORY or csv_path.name != expected_name:
@@ -506,6 +555,10 @@ def validate_state_characterization_config() -> None:
         ("IDVD_FIELDNAMES", IDVD_FIELDNAMES),
         ("METRICS_FIELDNAMES", METRICS_FIELDNAMES),
         ("MEMORY_STATE_MAP_FIELDNAMES", MEMORY_STATE_MAP_FIELDNAMES),
+        (
+            "BASELINE_COMPARISON_FIELDNAMES",
+            BASELINE_COMPARISON_FIELDNAMES,
+        ),
     ):
         if not isinstance(fieldnames, tuple) or not fieldnames:
             raise ValueError(f"{schema_name} must be a non-empty tuple.")

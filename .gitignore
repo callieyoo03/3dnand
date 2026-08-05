@@ -44,6 +44,12 @@ Thumbs.db
 # Keep shared data
 !shared_data/**/*.csv
 !shared_data/**/*.xlsx
+!shared_data/mesh/
+!shared_data/mesh/**/
+!shared_data/mesh/**/*.msh
+!shared_data/mesh/**/*.vtm
+!shared_data/mesh/**/*.vtu
+!shared_data/mesh/**/*.visit
 
 # Generated plots
 *.png

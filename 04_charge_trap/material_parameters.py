@@ -22,7 +22,23 @@
 #   - Trap capture/emission is not included here.
 # ============================================================
 
+import sys
 from math import exp, pi, sqrt
+from pathlib import Path
+
+
+PROJECT_ROOT_DIRECTORY = Path(__file__).resolve().parent.parent
+PROJECT_ROOT_TEXT = str(PROJECT_ROOT_DIRECTORY)
+
+if PROJECT_ROOT_TEXT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_TEXT)
+
+import compact_handoff_parameters as compact_parameters
+
+if Path(compact_parameters.__file__).resolve() != (
+    PROJECT_ROOT_DIRECTORY / "compact_handoff_parameters.py"
+).resolve():
+    raise ImportError("compact_handoff_parameters resolved outside this repository.")
 
 
 # ============================================================
@@ -49,40 +65,54 @@ eps0 = 8.8541878128e-14
 # Layer thicknesses
 # ============================================================
 
-mos2_thickness = 2.0e-7
+mos2_thickness = (
+    compact_parameters.MOS2_THICKNESS_NM
+    * compact_parameters.NM_TO_CM
+)
 # cm
 # 2 nm
 
-tunnel_oxide_thickness = 4.0e-7
+tunnel_oxide_thickness = (
+    compact_parameters.TUNNEL_OXIDE_THICKNESS_NM
+    * compact_parameters.NM_TO_CM
+)
 # cm
-# 4 nm Al2O3
+# 3 nm Al2O3
 
-charge_trap_thickness = 5.0e-7
+charge_trap_thickness = (
+    compact_parameters.CHARGE_TRAP_THICKNESS_NM
+    * compact_parameters.NM_TO_CM
+)
 # cm
 # 5 nm HfO2
 
-blocking_oxide_thickness = 8.0e-7
+blocking_oxide_thickness = (
+    compact_parameters.BLOCKING_OXIDE_THICKNESS_NM
+    * compact_parameters.NM_TO_CM
+)
 # cm
-# 8 nm Al2O3
+# 16 nm Al2O3
 
 
 # ============================================================
 # Relative dielectric constants
 # ============================================================
 
-relative_permittivity_core_oxide = 3.9
+relative_permittivity_core_oxide = (
+    compact_parameters.CORE_OXIDE_RELATIVE_PERMITTIVITY
+)
 # Initial SiO2-like core approximation
 
-relative_permittivity_mos2 = 6.7
+relative_permittivity_mos2 = compact_parameters.MOS2_RELATIVE_PERMITTIVITY
 # Initial out-of-plane MoS2 approximation
 
-relative_permittivity_al2o3 = 9.0
-# Baseline Al2O3 value
+relative_permittivity_al2o3 = compact_parameters.AL2O3_RELATIVE_PERMITTIVITY
+# Literature nominal Al2O3 value
 
-relative_permittivity_hfo2 = 20.0
-# Baseline HfO2 value
+relative_permittivity_hfo2 = compact_parameters.HFO2_RELATIVE_PERMITTIVITY
+# Literature nominal HfO2 value
 
-relative_permittivity_air = 1.0
+relative_permittivity_air = compact_parameters.AIR_RELATIVE_PERMITTIVITY
 
 
 # ============================================================

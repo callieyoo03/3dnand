@@ -3,6 +3,23 @@
 # MoS2 / Al2O3 / HfO2 / Al2O3 cylindrical GAA memory
 # ============================================================
 
+import sys
+from pathlib import Path
+
+
+PROJECT_ROOT_DIRECTORY = Path(__file__).resolve().parent.parent
+PROJECT_ROOT_TEXT = str(PROJECT_ROOT_DIRECTORY)
+
+if PROJECT_ROOT_TEXT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_TEXT)
+
+import compact_handoff_parameters as compact_parameters
+
+if Path(compact_parameters.__file__).resolve() != (
+    PROJECT_ROOT_DIRECTORY / "compact_handoff_parameters.py"
+).resolve():
+    raise ImportError("compact_handoff_parameters resolved outside this repository.")
+
 
 # ============================================================
 # Fundamental constant
@@ -23,7 +40,10 @@ CHARGE_TRAP_REGION = "ChargeTrap"
 # HfO2 charge-trap thickness
 # ============================================================
 
-charge_trap_thickness = 5.0e-7
+charge_trap_thickness = (
+    compact_parameters.CHARGE_TRAP_THICKNESS_NM
+    * compact_parameters.NM_TO_CM
+)
 # cm
 # 5 nm
 

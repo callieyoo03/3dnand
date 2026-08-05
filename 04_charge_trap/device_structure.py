@@ -3,6 +3,9 @@
 # MoS2 Cylindrical GAA Charge-Trap Memory
 # ============================================================
 
+import sys
+from pathlib import Path
+
 from devsim import (
     create_2d_mesh,
     add_2d_mesh_line,
@@ -18,6 +21,20 @@ from devsim import (
 )
 
 
+PROJECT_ROOT_DIRECTORY = Path(__file__).resolve().parent.parent
+PROJECT_ROOT_TEXT = str(PROJECT_ROOT_DIRECTORY)
+
+if PROJECT_ROOT_TEXT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_TEXT)
+
+import compact_handoff_parameters as compact_parameters
+
+if Path(compact_parameters.__file__).resolve() != (
+    PROJECT_ROOT_DIRECTORY / "compact_handoff_parameters.py"
+).resolve():
+    raise ImportError("compact_handoff_parameters resolved outside this repository.")
+
+
 device = "MoS2_GAA"
 mesh = "gaa_mesh"
 
@@ -26,32 +43,58 @@ mesh = "gaa_mesh"
 # Geometry
 # ============================================================
 
+NM_TO_CM = compact_parameters.NM_TO_CM
+
 r_axis = 0.0
 
-r_core = 1.0e-6
+r_core = compact_parameters.CORE_RADIUS_NM * NM_TO_CM
 # 10 nm
 
-r_mos2 = 1.2e-6
+r_mos2 = (
+    compact_parameters.CORE_RADIUS_NM
+    + compact_parameters.MOS2_THICKNESS_NM
+) * NM_TO_CM
 # 12 nm
 
-r_tox = 1.6e-6
-# 16 nm
+r_tox = (
+    compact_parameters.CORE_RADIUS_NM
+    + compact_parameters.MOS2_THICKNESS_NM
+    + compact_parameters.TUNNEL_OXIDE_THICKNESS_NM
+) * NM_TO_CM
+# 15 nm
 
-r_trap = 2.1e-6
-# 21 nm
+r_trap = (
+    compact_parameters.CORE_RADIUS_NM
+    + compact_parameters.MOS2_THICKNESS_NM
+    + compact_parameters.TUNNEL_OXIDE_THICKNESS_NM
+    + compact_parameters.CHARGE_TRAP_THICKNESS_NM
+) * NM_TO_CM
+# 20 nm
 
-r_block = 2.9e-6
-# 29 nm
+r_block = (
+    compact_parameters.CORE_RADIUS_NM
+    + compact_parameters.MOS2_THICKNESS_NM
+    + compact_parameters.TUNNEL_OXIDE_THICKNESS_NM
+    + compact_parameters.CHARGE_TRAP_THICKNESS_NM
+    + compact_parameters.BLOCKING_OXIDE_THICKNESS_NM
+) * NM_TO_CM
+# 36 nm
 
-r_gate_outer = 3.1e-6
-# 31 nm
+r_gate_outer = (
+    r_block
+    + compact_parameters.GATE_METAL_THICKNESS_NM * NM_TO_CM
+)
+# 38 nm
 
-r_air_outer = 3.3e-6
-# 33 nm
+r_air_outer = (
+    r_gate_outer
+    + compact_parameters.AIR_THICKNESS_NM * NM_TO_CM
+)
+# 40 nm
 
 z_source = 0.0
 
-z_drain = 1.0e-5
+z_drain = compact_parameters.CHANNEL_LENGTH_NM * NM_TO_CM
 # 100 nm
 
 

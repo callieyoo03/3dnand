@@ -1,0 +1,15 @@
+region,parameter,value,unit,source_file,provenance,status,notes,runtime_verified
+TunnelOxide;BlockingOxide,relative_permittivity,8.9,1,compact_handoff_parameters.py,literature nominal Al2O3 dielectric constant,literature_nominal,Used by both Al2O3 dielectric regions,true
+ChargeTrap,relative_permittivity,19.65,1,compact_handoff_parameters.py,literature nominal HfO2 dielectric constant,literature_nominal,Charge-trap dielectric,true
+MoS2,relative_permittivity,6.7,1,compact_handoff_parameters.py,repository out-of-plane MoS2 value,repo_default,Not process-calibrated,true
+CoreOxide,relative_permittivity,3.9,1,compact_handoff_parameters.py,SiO2-like core approximation,repo_default,Core material is an approximation,true
+MoS2,bandgap,1.67,eV,04_charge_trap/material_parameters.py,repository transport baseline,repo_default,Used indirectly in intrinsic-density calculation,false
+MoS2,electron_affinity,4.21,eV,04_charge_trap/material_parameters.py,repository transport baseline,repo_default,Recorded for handoff; no explicit heterojunction model,false
+MoS2,electron_mobility,50.0,cm^2/(V*s),04_charge_trap/material_parameters.py,constant mobility assumption,uncalibrated,Used by the electron continuity model,true
+MoS2,hole_mobility,10.0,cm^2/(V*s),04_charge_trap/material_parameters.py,future ambipolar placeholder,placeholder,No hole continuity equation is solved,false
+Gate,work_function,4.5,eV,04_charge_trap/material_parameters.py,repository placeholder,placeholder,Current gate boundary uses zero work-function offset,false
+Device,temperature,300.0,K,04_charge_trap/material_parameters.py,repository simulation condition,repo_default,Isothermal DC simulation,true
+MoS2,channel_doping,1000000000000000.0,cm^-3,04_charge_trap/material_parameters.py,uniform channel model,uncalibrated,Spatially applied as uniform Donors,true
+Source;Drain,source_drain_doping,1e+19,cm^-3,04_charge_trap/material_parameters.py,declared repository value,placeholder,Declared but not spatially implemented in the present device,false
+TunnelOxide,FN_barrier_height,3.56,eV,05_program_erase/tunneling_parameters.py,CBO-based MoS2/Al2O3 candidate,literature_nominal,Uncalibrated; not changed or refit in this handoff,false
+TunnelOxide,tunneling_effective_mass_ratio,0.28,m0,05_program_erase/tunneling_parameters.py,literature nominal tunneling mass,literature_nominal,Uncalibrated; not changed or refit in this handoff,false

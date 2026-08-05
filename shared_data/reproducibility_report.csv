@@ -1,0 +1,9 @@
+file,row_count,numeric_cell_count,exact_text_cell_count,max_absolute_difference,max_relative_difference,max_normalized_error,relative_tolerance,absolute_tolerance,passed,notes
+idvg_by_state.csv,615,4920,1845,8.50225864418755e-20,0.4661364799986681,4.145454967989418e-05,0.0001,1e-18,True,
+idvd_by_state.csv,385,3080,1155,8.171220963043829e-20,1.9150368619976315,0.044900564103691636,0.0001,1e-18,True,
+metrics_by_state.csv,15,330,75,368904005.58203125,1.973257901036742e-05,0.19732579010367418,0.0001,1e-18,True,
+memory_state_map.csv,15,105,15,4.440892098500626e-16,7.575218897853384e-15,7.575218897852091e-11,0.0001,1e-18,True,
+baseline_comparison_legacy_vs_final.csv,15,225,60,368904005.58203125,1.973257901036742e-05,0.19732579010367418,0.0001,1e-18,True,
+terminal_charge_by_state.csv,10,150,60,5.1522477872247334e-30,1.661588870704903,0.0035937844989410547,0.0001,1e-28,True,
+capacitance_matrix_by_state.csv,270,1890,2160,5.620633949699709e-27,5.944992415280623e-10,5.944991786473777e-06,0.0001,1e-28,True,
+capacitance_summary_by_state.csv,10,130,70,2.3373522794979326e-10,0.6578947368421053,0.006501883857330262,0.0001,1e-28,True,"derived-diagnostic absolute overrides: Cgd_relative_sensitivity,Cgg_relative_sensitivity,Cgs_relative_sensitivity,gate_capacitance_row_sum_F"

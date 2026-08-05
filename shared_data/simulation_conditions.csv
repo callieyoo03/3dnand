@@ -1,0 +1,41 @@
+analysis,parameter,value,unit,notes
+ID-VG,VDS_values,0.01;0.05;0.1,V,Fixed drain biases
+ID-VG,VGS_start,-1.0,V,Inclusive sweep start
+ID-VG,VGS_stop,3.0,V,Inclusive sweep stop
+ID-VG,VGS_step,0.1,V,Uniform output step
+ID-VD,VGS_values,0;0.5;1;1.5;2;2.5;3,V,Fixed gate biases
+ID-VD,VDS_start,0.0,V,Inclusive sweep start
+ID-VD,VDS_stop,0.1,V,Inclusive sweep stop
+ID-VD,VDS_step,0.01,V,Uniform output step
+memory_state,State_0_Empty,0.0,cm^-3,state_index=0; static fixed trapped-electron density
+memory_state,State_1,2e+17,cm^-3,state_index=1; static fixed trapped-electron density
+memory_state,State_2,5e+17,cm^-3,state_index=2; static fixed trapped-electron density
+memory_state,State_3,1e+18,cm^-3,state_index=3; static fixed trapped-electron density
+memory_state,State_4_Programmed,2e+18,cm^-3,state_index=4; static fixed trapped-electron density
+metric,Vth_constant_current,1e-10,A,Log-current interpolation
+metric,SS_current_min,1e-18,A,Lower regression-window bound
+metric,SS_current_max,1e-10,A,Upper regression-window bound
+metric,SS_minimum_points,4,count,Minimum points for log-current regression
+metric,Ion_bias,VGS=3;VDS=0.05,V,Ion is the absolute drain-current magnitude
+metric,Ioff_bias,VGS=-1;VDS=0.05,V,Ioff is the absolute drain-current magnitude
+metric,gm_definition,max(abs(dID/dVGS)),S,Three-point derivative on the sampled ID-VG curve
+metric,current_floor,1e-30,A,Protects logarithms and floor-limited ON/OFF reporting
+solver,solver_type,direct,,DEVSIM DC Newton solve
+solver,absolute_error,10000000000.0,,DEVSIM absolute convergence criterion
+solver,relative_error,1e-09,,DEVSIM relative convergence criterion
+solver,maximum_iterations,150,count,Default DC limit
+solver,gate_initial_ramp_step,0.05,V,Adaptive continuation
+solver,gate_minimum_ramp_step,0.0025,V,Adaptive continuation
+solver,drain_initial_ramp_step,0.01,V,Adaptive continuation
+solver,drain_minimum_ramp_step,0.0005,V,Adaptive continuation
+program_reference,gate_voltage,16.0,V,Existing nominal program condition; no FN recalibration performed
+program_reference,drain_voltage,0.05,V,Existing nominal program condition
+program_reference,target_nsheet,1000000000000.0,cm^-2,Equivalent to 2.0e18 cm^-3 for a 5 nm CTL
+program_reference,target_nvolume,2e+18,cm^-3,Static programmed read state
+units,mesh_coordinate,centimeter,cm,DEVSIM x=r and y=z coordinates
+units,drain_current,cylindrical_contact_integral,A,get_contact_current with cylindrical edge coupling; not per-unit-depth
+units,local_electron_current,current_density,A/cm^2,VTK element-vector components
+geometry,axisymmetric_weighting,CylindricalNodeVolume;CylindricalEdgeCouple,,2*pi*r rotational weighting; no arbitrary planar area
+capacitance,definition,Cij=dQi/dVj,F,Direct derivative sign; measured charge index first
+capacitance,nominal_delta_voltage,0.001,V,Central finite difference with fixed trap density
+capacitance,sensitivity_delta_voltage,0.0005;0.001;0.002,V,Central-difference sensitivity set

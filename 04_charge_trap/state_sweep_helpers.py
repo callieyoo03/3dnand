@@ -157,8 +157,47 @@ def initialize_characterization_device() -> tuple[dict[str, Any], OperatingPoint
     """
 
     geometry = initialize_device()
+    validate_canonical_handoff_geometry(geometry)
     solve_empty_state()
     return geometry, OperatingPoint()
+
+
+def validate_canonical_handoff_geometry(
+    geometry: Mapping[str, Any],
+) -> dict[str, float]:
+    """Reject environment or caller overrides in final handoff runners.
+
+    ``run_memory_window`` retains its historical environment-driven tunnel-
+    oxide override for backward compatibility with exploratory scripts.  All
+    state-characterization, Q/C, metadata, and mesh runners enter through this
+    helper and must use the canonical 3/5/16-nm geometry instead.
+    """
+
+    canonical = memory_window.compact_parameters
+    expected = {
+        **canonical.geometry_dict(),
+        **canonical.expected_outer_radii_nm(),
+    }
+    verified: dict[str, float] = {}
+    for name, expected_value in expected.items():
+        if name not in geometry:
+            raise RuntimeError(
+                f"Final handoff geometry is missing {name!r}."
+            )
+        actual_value = float(geometry[name])
+        if not math.isfinite(actual_value) or not math.isclose(
+            actual_value,
+            float(expected_value),
+            rel_tol=0.0,
+            abs_tol=1.0e-9,
+        ):
+            raise RuntimeError(
+                "Final handoff geometry must match the canonical source: "
+                f"{name}={actual_value:.12e} nm, expected "
+                f"{float(expected_value):.12e} nm."
+            )
+        verified[name] = actual_value
+    return verified
 
 
 def ramp_terminal(
@@ -451,6 +490,7 @@ __all__ = [
     "ramp_trap_density",
     "set_terminal_bias",
     "solve_dc",
+    "validate_canonical_handoff_geometry",
     "write_csv",
     "write_standard_csv",
 ]

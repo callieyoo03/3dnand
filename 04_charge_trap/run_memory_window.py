@@ -60,6 +60,7 @@ from devsim import (
     get_device_list,
     get_interface_list,
     get_node_model_values,
+    get_parameter,
     get_region_list,
     set_node_values,
     set_parameter,
@@ -94,6 +95,18 @@ import sys
 PROJECT_ROOT_DIRECTORY = (
     Path(__file__).resolve().parent.parent
 )
+
+PROJECT_ROOT_TEXT = str(PROJECT_ROOT_DIRECTORY)
+
+if PROJECT_ROOT_TEXT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_TEXT)
+
+import compact_handoff_parameters as compact_parameters
+
+if Path(compact_parameters.__file__).resolve() != (
+    PROJECT_ROOT_DIRECTORY / "compact_handoff_parameters.py"
+).resolve():
+    raise ImportError("compact_handoff_parameters resolved outside this repository.")
 
 PARAMETERIZED_DEVICE_STRUCTURE_PATH = (
     PROJECT_ROOT_DIRECTORY
@@ -200,6 +213,7 @@ from trap_models import (
 )
 
 import trap_parameters as tp
+import material_parameters as mp
 
 
 # ============================================================
@@ -208,7 +222,9 @@ import trap_parameters as tp
 
 CURRENT_FLOOR_A = 1.0e-30
 
-DEFAULT_TUNNEL_OXIDE_THICKNESS_NM = 4.0
+DEFAULT_TUNNEL_OXIDE_THICKNESS_NM = (
+    compact_parameters.TUNNEL_OXIDE_THICKNESS_NM
+)
 
 DEFAULT_TRAP_INITIAL_STEP_CM3 = 2.0e17
 DEFAULT_TRAP_MINIMUM_STEP_CM3 = 1.0e15
@@ -1277,6 +1293,141 @@ def extract_threshold_voltage(
 # Device initialization
 # ============================================================
 
+def expected_runtime_geometry_nm():
+    """Return the geometry values that this state runner must create."""
+
+    geometry = compact_parameters.geometry_dict()
+    geometry["tunnel_oxide_thickness_nm"] = float(
+        TUNNEL_OXIDE_THICKNESS_NM
+    )
+
+    core_outer_radius_nm = geometry["core_radius_nm"]
+    mos2_outer_radius_nm = (
+        core_outer_radius_nm + geometry["mos2_thickness_nm"]
+    )
+    tunnel_outer_radius_nm = (
+        mos2_outer_radius_nm + geometry["tunnel_oxide_thickness_nm"]
+    )
+    trap_outer_radius_nm = (
+        tunnel_outer_radius_nm + geometry["charge_trap_thickness_nm"]
+    )
+    blocking_outer_radius_nm = (
+        trap_outer_radius_nm + geometry["blocking_oxide_thickness_nm"]
+    )
+    gate_outer_radius_nm = (
+        blocking_outer_radius_nm + geometry["gate_metal_thickness_nm"]
+    )
+    air_outer_radius_nm = (
+        gate_outer_radius_nm + geometry["air_thickness_nm"]
+    )
+
+    geometry.update(
+        {
+            "core_outer_radius_nm": core_outer_radius_nm,
+            "mos2_outer_radius_nm": mos2_outer_radius_nm,
+            "tunnel_oxide_outer_radius_nm": tunnel_outer_radius_nm,
+            "charge_trap_outer_radius_nm": trap_outer_radius_nm,
+            "blocking_oxide_outer_radius_nm": blocking_outer_radius_nm,
+            "gate_outer_radius_nm": gate_outer_radius_nm,
+            "air_outer_radius_nm": air_outer_radius_nm,
+        }
+    )
+    return geometry
+
+
+def verify_runtime_geometry(geometry):
+    """Verify every supplied layer dimension and accumulated radius."""
+
+    expected_geometry = expected_runtime_geometry_nm()
+
+    for geometry_key, expected_value in expected_geometry.items():
+        if geometry_key not in geometry:
+            raise RuntimeError(
+                "Geometry output is missing the key "
+                f'"{geometry_key}".'
+            )
+
+        actual_value = float(geometry[geometry_key])
+        if not math.isclose(
+            actual_value,
+            float(expected_value),
+            rel_tol=0.0,
+            abs_tol=1.0e-9,
+        ):
+            raise RuntimeError(
+                f"Runtime geometry mismatch for {geometry_key}.\n"
+                f"Expected: {float(expected_value):.12e} nm\n"
+                f"Created:  {actual_value:.12e} nm"
+            )
+
+    return expected_geometry
+
+
+def verify_runtime_material_parameters():
+    """Verify the DEVSIM permittivities and print their relative values."""
+
+    expected_absolute_permittivity = {
+        "CoreOxide": mp.eps_core_oxide,
+        "MoS2": mp.eps_mos2,
+        "TunnelOxide": mp.eps_tunnel_oxide,
+        "ChargeTrap": mp.eps_charge_trap,
+        "BlockingOxide": mp.eps_blocking_oxide,
+    }
+    expected_relative_permittivity = (
+        compact_parameters.material_dict()
+    )
+    actual_relative_permittivity = {}
+
+    for region, expected_absolute in expected_absolute_permittivity.items():
+        actual_absolute = float(
+            get_parameter(
+                device=device,
+                region=region,
+                name="Permittivity",
+            )
+        )
+        if not math.isclose(
+            actual_absolute,
+            float(expected_absolute),
+            rel_tol=1.0e-12,
+            abs_tol=0.0,
+        ):
+            raise RuntimeError(
+                f"Runtime permittivity mismatch in {region}.\n"
+                f"Expected: {float(expected_absolute):.12e} F/cm\n"
+                f"Assigned: {actual_absolute:.12e} F/cm"
+            )
+
+        actual_relative = actual_absolute / mp.eps0
+        expected_relative = float(expected_relative_permittivity[region])
+        if not math.isclose(
+            actual_relative,
+            expected_relative,
+            rel_tol=1.0e-12,
+            abs_tol=1.0e-12,
+        ):
+            raise RuntimeError(
+                f"Relative-permittivity mismatch in {region}: "
+                f"{actual_relative:.12e} != {expected_relative:.12e}."
+            )
+        actual_relative_permittivity[region] = actual_relative
+
+    print("Runtime material verification:")
+    print(
+        "  Material version       = "
+        f"{compact_parameters.MATERIAL_VERSION}"
+    )
+    print(
+        "  Al2O3 relative k       = "
+        f"{actual_relative_permittivity['TunnelOxide']:.6f}"
+    )
+    print(
+        "  HfO2 relative k        = "
+        f"{actual_relative_permittivity['ChargeTrap']:.6f}"
+    )
+
+    return actual_relative_permittivity
+
 def initialize_device():
     print_section(
         "STEP 1 : VALIDATE INPUTS"
@@ -1293,9 +1444,20 @@ def initialize_device():
     )
 
     geometry = create_structure(
-        tunnel_oxide_thickness_nm=(
-            TUNNEL_OXIDE_THICKNESS_NM
+        core_radius_nm=compact_parameters.CORE_RADIUS_NM,
+        mos2_thickness_nm=compact_parameters.MOS2_THICKNESS_NM,
+        tunnel_oxide_thickness_nm=TUNNEL_OXIDE_THICKNESS_NM,
+        charge_trap_thickness_nm=(
+            compact_parameters.CHARGE_TRAP_THICKNESS_NM
         ),
+        blocking_oxide_thickness_nm=(
+            compact_parameters.BLOCKING_OXIDE_THICKNESS_NM
+        ),
+        gate_metal_thickness_nm=(
+            compact_parameters.GATE_METAL_THICKNESS_NM
+        ),
+        air_thickness_nm=compact_parameters.AIR_THICKNESS_NM,
+        channel_length_nm=compact_parameters.CHANNEL_LENGTH_NM,
     )
 
     if geometry is None:
@@ -1304,45 +1466,27 @@ def initialize_device():
             "A geometry dictionary was expected."
         )
 
-    required_geometry_keys = (
-        "tunnel_oxide_thickness_nm",
-        "charge_trap_thickness_nm",
-        "mos2_outer_radius_nm",
-        "tunnel_oxide_outer_radius_nm",
-        "charge_trap_outer_radius_nm",
-        "blocking_oxide_outer_radius_nm",
-        "gate_outer_radius_nm",
-    )
-
-    for geometry_key in required_geometry_keys:
-        if geometry_key not in geometry:
-            raise RuntimeError(
-                "Geometry output is missing the key "
-                f'"{geometry_key}".'
-            )
-
-    actual_tunnel_oxide_thickness_nm = float(
-        geometry[
-            "tunnel_oxide_thickness_nm"
-        ]
-    )
-
-    if abs(
-        actual_tunnel_oxide_thickness_nm
-        - TUNNEL_OXIDE_THICKNESS_NM
-    ) > 1.0e-9:
-        raise RuntimeError(
-            "TunnelOxide thickness mismatch.\n"
-            "Requested thickness: "
-            f"{TUNNEL_OXIDE_THICKNESS_NM:.12e} nm\n"
-            "Created thickness: "
-            f"{actual_tunnel_oxide_thickness_nm:.12e} nm"
-        )
+    verify_runtime_geometry(geometry)
 
     verify_device_structure()
 
     print(
         "Created geometry:"
+    )
+
+    print(
+        "  Geometry version       = "
+        f"{compact_parameters.GEOMETRY_VERSION}"
+    )
+
+    print(
+        "  Core radius            = "
+        f"{geometry['core_radius_nm']:.6f} nm"
+    )
+
+    print(
+        "  MoS2 thickness         = "
+        f"{geometry['mos2_thickness_nm']:.6f} nm"
     )
 
     print(
@@ -1353,6 +1497,26 @@ def initialize_device():
     print(
         "  ChargeTrap thickness  = "
         f"{geometry['charge_trap_thickness_nm']:.6f} nm"
+    )
+
+    print(
+        "  BlockingOxide thickness = "
+        f"{geometry['blocking_oxide_thickness_nm']:.6f} nm"
+    )
+
+    print(
+        "  Gate metal thickness  = "
+        f"{geometry['gate_metal_thickness_nm']:.6f} nm"
+    )
+
+    print(
+        "  Air thickness         = "
+        f"{geometry['air_thickness_nm']:.6f} nm"
+    )
+
+    print(
+        "  Channel length        = "
+        f"{geometry['channel_length_nm']:.6f} nm"
     )
 
     print(
@@ -1385,6 +1549,7 @@ def initialize_device():
     )
 
     set_material_parameters()
+    verify_runtime_material_parameters()
 
     print_section(
         "STEP 4 : DOPING"

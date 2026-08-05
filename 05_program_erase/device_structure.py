@@ -6,6 +6,9 @@
 # Internal DEVSIM geometry units are cm.
 # ============================================================
 
+import sys
+from pathlib import Path
+
 from devsim import (
     create_2d_mesh,
     add_2d_mesh_line,
@@ -21,6 +24,20 @@ from devsim import (
 )
 
 
+PROJECT_ROOT_DIRECTORY = Path(__file__).resolve().parent.parent
+PROJECT_ROOT_TEXT = str(PROJECT_ROOT_DIRECTORY)
+
+if PROJECT_ROOT_TEXT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_TEXT)
+
+import compact_handoff_parameters as compact_parameters
+
+if Path(compact_parameters.__file__).resolve() != (
+    PROJECT_ROOT_DIRECTORY / "compact_handoff_parameters.py"
+).resolve():
+    raise ImportError("compact_handoff_parameters resolved outside this repository.")
+
+
 device = "MoS2_GAA"
 mesh = "gaa_mesh"
 
@@ -29,7 +46,7 @@ mesh = "gaa_mesh"
 # Unit conversion
 # ============================================================
 
-NM_TO_CM = 1.0e-7
+NM_TO_CM = compact_parameters.NM_TO_CM
 
 
 def nm_to_cm(
@@ -42,21 +59,29 @@ def nm_to_cm(
 # Default geometry parameters
 # ============================================================
 
-DEFAULT_CORE_RADIUS_NM = 10.0
+DEFAULT_CORE_RADIUS_NM = compact_parameters.CORE_RADIUS_NM
 
-DEFAULT_MOS2_THICKNESS_NM = 2.0
+DEFAULT_MOS2_THICKNESS_NM = compact_parameters.MOS2_THICKNESS_NM
 
-DEFAULT_TUNNEL_OXIDE_THICKNESS_NM = 4.0
+DEFAULT_TUNNEL_OXIDE_THICKNESS_NM = (
+    compact_parameters.TUNNEL_OXIDE_THICKNESS_NM
+)
 
-DEFAULT_CHARGE_TRAP_THICKNESS_NM = 5.0
+DEFAULT_CHARGE_TRAP_THICKNESS_NM = (
+    compact_parameters.CHARGE_TRAP_THICKNESS_NM
+)
 
-DEFAULT_BLOCKING_OXIDE_THICKNESS_NM = 8.0
+DEFAULT_BLOCKING_OXIDE_THICKNESS_NM = (
+    compact_parameters.BLOCKING_OXIDE_THICKNESS_NM
+)
 
-DEFAULT_GATE_METAL_THICKNESS_NM = 2.0
+DEFAULT_GATE_METAL_THICKNESS_NM = (
+    compact_parameters.GATE_METAL_THICKNESS_NM
+)
 
-DEFAULT_AIR_THICKNESS_NM = 2.0
+DEFAULT_AIR_THICKNESS_NM = compact_parameters.AIR_THICKNESS_NM
 
-DEFAULT_CHANNEL_LENGTH_NM = 100.0
+DEFAULT_CHANNEL_LENGTH_NM = compact_parameters.CHANNEL_LENGTH_NM
 
 
 # ============================================================
@@ -889,6 +914,34 @@ def create_structure(
         value=geometry[
             "channel_length_nm"
         ],
+    )
+
+    set_parameter(
+        device=device,
+        name="gate_metal_thickness_nm",
+        value=geometry[
+            "gate_metal_thickness_nm"
+        ],
+    )
+
+    set_parameter(
+        device=device,
+        name="air_thickness_nm",
+        value=geometry[
+            "air_thickness_nm"
+        ],
+    )
+
+    set_parameter(
+        device=device,
+        name="geometry_version",
+        value=compact_parameters.GEOMETRY_VERSION,
+    )
+
+    set_parameter(
+        device=device,
+        name="material_version",
+        value=compact_parameters.MATERIAL_VERSION,
     )
 
     print()
