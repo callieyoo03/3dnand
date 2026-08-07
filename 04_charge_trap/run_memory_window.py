@@ -185,8 +185,14 @@ parameterized_device_structure = (
     load_parameterized_device_structure_module()
 )
 
+from contact_topology_structure import (
+    bind_characterization_create_structure,
+)
+
 create_structure = (
-    parameterized_device_structure.create_structure
+    bind_characterization_create_structure(
+        parameterized_device_structure
+    )
 )
 
 device = (
