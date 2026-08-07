@@ -1,0 +1,19 @@
+parameter,value,unit,required,source,provenance,status,notes
+hfo2_electron_trap_energy_depth,,eV,true,user_provided_report_and_repository_audit,no numeric value found,missing,Required relative to an explicit energy reference; no value was inferred
+trap_energy_reference,,enum,true,user_provided_report_and_repository_audit,no CBM vacuum or Fermi-level reference found,missing,Required to combine electrostatic potential with material band edges
+attempt_frequency,,s^-1,true,user_provided_report_and_repository_audit,no attempt-rate model or value found,missing,Blocks absolute Gamma_channel Gamma_gate and Gamma_total
+trap_spatial_distribution,uniform_volume_static_charge_assumption,enum,true,05_program_erase/trap_models.py:76-110 and user-provided report,single scalar Ntrap is applied throughout ChargeTrap,assumption_only,Available as an electrostatic discretization assumption but not physically calibrated localization
+physical_trap_spatial_distribution_provenance,,text,true,user_provided_report_and_repository_audit,report states spatial localization is absent,missing,Needed to select uniform versus interface-localized physical occupancy
+trap_to_channel_band_offset,,eV,true,user_provided_report_and_repository_audit,no HfO2 trap Al2O3 MoS2 lineup found,missing,The 3.56 eV program barrier is not a localized trap-to-channel offset
+trap_to_gate_band_offset,,eV,true,user_provided_report_and_repository_audit,no HfO2 trap blocking-Al2O3 gate lineup found,missing,Gate work function is a placeholder and runtime uses zero offset
+al2o3_electron_tunneling_effective_mass_ratio,0.28,m0,true,05_program_erase/tunneling_parameters.py:65-69,literature nominal without bibliographic citation or co-fitting,uncalibrated_negative_control_only,May parameterize an Al2O3 path segment only; does not enable trap emission
+hfo2_electron_tunneling_effective_mass_ratio,,m0,true,user_provided_report_and_repository_audit,no value found,missing,Required whenever a WKB path crosses finite HfO2 distance
+stable_residual_trap_fraction,,1,false,user_provided_report_and_repository_audit,no physical stable or non-emitting fraction found,missing,Needed for a residual floor prediction but not for the zero-floor rate-equation interface
+channel_emission_branching_assumption,,1,true,user_provided_report_and_repository_audit,no final-state or path-prefactor model found,missing,No 50:50 split is assumed; ratio is derived only from independently parameterized rates
+gate_emission_branching_assumption,,1,true,user_provided_report_and_repository_audit,no final-state or path-prefactor model found,missing,No 50:50 split is assumed; ratio is derived only from independently parameterized rates
+configured_initial_trap_sheet_density,1e12,cm^-2,false,05_program_erase/erase_parameters.py:77,user-specified baseline initial state,user_supplied_operating_condition,Not an emission material parameter
+configured_target_residual_sheet_density,1e10,cm^-2,false,05_program_erase/erase_parameters.py:79,user-specified diagnostic target,user_supplied_operating_condition,Not an actual erased state or a measured stable fraction
+configured_target_to_initial_ratio,0.01,1,false,derived from configured sheet densities,arithmetic ratio only,derived_only_not_stable_fraction,Must not be reinterpreted as a physical residual fraction
+mos2_electron_affinity,4.21,eV,false,05_program_erase/material_parameters.py:164,repository transport baseline,repo_default_no_heterojunction_model,Insufficient without oxide affinities and a common energy reference
+gate_work_function,4.5,eV,false,05_program_erase/material_parameters.py:330,repository placeholder,placeholder_runtime_zero_offset,Insufficient for a physical trap-to-gate band path
+program_fn_barrier,3.56,eV,false,05_program_erase/tunneling_parameters.py:58-63,MoS2 Al2O3 CBO candidate,uncalibrated_negative_control_only,Not a localized-trap channel or gate emission barrier

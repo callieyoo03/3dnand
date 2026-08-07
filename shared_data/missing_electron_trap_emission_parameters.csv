@@ -1,0 +1,11 @@
+parameter,value,unit,required,source,provenance,status,notes
+hfo2_electron_trap_energy_depth,,eV,true,user_provided_report_and_repository_audit,no numeric value found,missing,Required relative to an explicit energy reference
+trap_energy_reference,,enum,true,user_provided_report_and_repository_audit,no CBM vacuum or Fermi-level reference found,missing,Required to build U(r)
+attempt_frequency,,s^-1,true,user_provided_report_and_repository_audit,no attempt-rate model or value found,missing,Blocks absolute emission rates
+physical_trap_spatial_distribution_provenance,,text,true,user_provided_report_and_repository_audit,report states spatial localization is absent,missing,Uniform volume remains an uncalibrated numerical assumption only
+trap_to_channel_band_offset,,eV,true,user_provided_report_and_repository_audit,no HfO2 trap Al2O3 MoS2 lineup found,missing,Program FN barrier is not substituted
+trap_to_gate_band_offset,,eV,true,user_provided_report_and_repository_audit,no HfO2 trap blocking-Al2O3 gate lineup found,missing,Placeholder gate work function is not substituted
+hfo2_electron_tunneling_effective_mass_ratio,,m0,true,user_provided_report_and_repository_audit,no value found,missing,Required for finite HfO2 WKB segments
+stable_residual_trap_fraction,,1,false,user_provided_report_and_repository_audit,no physical stable or non-emitting fraction found,missing,Configured 0.01 target ratio is not substituted
+channel_emission_branching_assumption,,1,true,user_provided_report_and_repository_audit,no final-state or path-prefactor model found,missing,No arbitrary channel fraction is used
+gate_emission_branching_assumption,,1,true,user_provided_report_and_repository_audit,no final-state or path-prefactor model found,missing,No arbitrary gate fraction is used
